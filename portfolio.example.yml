@@ -1,0 +1,32 @@
+# Copy to portfolio.yml (git-ignored) and edit by hand when portfolio.source=file.
+# Shape mirrors the domain ports exactly. venue: KASE | KASE_GLOBAL | US; currency: KZT | USD | EUR.
+portfolio:
+  totalValueKzt: 1500000
+  asOf: 2026-10-23T10:00:00Z
+  fxRates:
+    USD: 525.0
+    EUR: 565.0
+  positions:
+    - secCode: AAPL
+      isin: US0378331005
+      venue: US
+      quantity: 10
+      available: 10
+      avgEntryPrice: 150.00
+      lastPrice: 165.00
+      priceCurrency: USD
+      marketValueKzt: 866250
+      unrealizedPnl: 150.00
+      unrealizedPnlPct: 0.10
+      hasTakeProfit: false
+      hasStopLoss: false
+      openedAt: 2026-09-01T14:30:00Z
+cash:
+  - currency: KZT
+    balance: 300000
+    balanceKzt: 300000
+    reservedByOpenBuyOrders: 0
+  - currency: USD
+    balance: 500
+    balanceKzt: 262500
+    reservedByOpenBuyOrders: 0

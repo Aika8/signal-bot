@@ -1,0 +1,30 @@
+# Secrets — never commit real credentials
+.env
+
+# Private broker adapter — developed outside this public repo
+adapter-broker-private/
+
+# Hand-edited portfolio file (may hold real holdings); keep portfolio.example.yml only
+portfolio.yml
+
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Build output in submodules
+**/build/
