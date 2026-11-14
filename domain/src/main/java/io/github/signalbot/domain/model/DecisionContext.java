@@ -10,9 +10,11 @@ import java.util.List;
  * @param triggerReason   why this evaluation fired (price move, news, earnings)
  * @param portfolio       current portfolio snapshot
  * @param cash            current cash balances
- * @param news            recent news for the symbol
- * @param snapshot        latest price snapshot for the symbol
+ * @param news            recent news for the symbol; empty = the feed answered "none"
+ * @param snapshot        latest price snapshot, or null only when no market-data feed is configured
  * @param previousVerdict the last verdict for this symbol, or null if none
+ * @param newsFeedEnabled whether a news feed is configured; false means {@code news} is
+ *                        "not available", not "no news"
  */
 public record DecisionContext(
         String symbol,
@@ -21,7 +23,8 @@ public record DecisionContext(
         List<CashBalance> cash,
         List<NewsItem> news,
         PriceSnapshot snapshot,
-        Verdict previousVerdict
+        Verdict previousVerdict,
+        boolean newsFeedEnabled
 ) {
     public DecisionContext {
         cash = cash == null ? List.of() : List.copyOf(cash);

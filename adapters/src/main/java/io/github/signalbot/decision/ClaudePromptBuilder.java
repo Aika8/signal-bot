@@ -44,12 +44,18 @@ public class ClaudePromptBuilder {
         if (ctx.snapshot() != null) {
             sb.append("Last price: ").append(ctx.snapshot().last())
                     .append(", prior close: ").append(ctx.snapshot().priorClose()).append('\n');
+        } else {
+            sb.append("Last price: not available (no market-data feed configured)\n");
         }
         sb.append("Previous verdict: ").append(previousVerdict(ctx.previousVerdict())).append('\n');
 
         sb.append("Portfolio total (KZT): ")
                 .append(ctx.portfolio() == null ? "n/a" : ctx.portfolio().totalValueKzt()).append('\n');
-        if (ctx.portfolio() != null && !ctx.portfolio().positions().isEmpty()) {
+        if (ctx.portfolio() == null) {
+            sb.append("Positions: not available\n");
+        } else if (ctx.portfolio().positions().isEmpty()) {
+            sb.append("Positions: none\n");
+        } else {
             sb.append("Positions:\n");
             for (Position p : ctx.portfolio().positions()) {
                 sb.append("  - ").append(p.secCode()).append(" qty ").append(p.quantity())
@@ -57,15 +63,21 @@ public class ClaudePromptBuilder {
                         .append(" uPnL% ").append(p.unrealizedPnlPct()).append('\n');
             }
         }
-        if (!ctx.cash().isEmpty()) {
+        if (ctx.cash().isEmpty()) {
+            sb.append("Cash: none\n");
+        } else {
             sb.append("Cash:");
             for (CashBalance c : ctx.cash()) {
                 sb.append(' ').append(c.currency()).append('=').append(c.balance());
             }
             sb.append('\n');
         }
-        if (!ctx.news().isEmpty()) {
-            sb.append("Recent news:\n");
+        if (!ctx.newsFeedEnabled()) {
+            sb.append("Recent news (24h): not available (no news feed configured)\n");
+        } else if (ctx.news().isEmpty()) {
+            sb.append("Recent news (24h): none\n");
+        } else {
+            sb.append("Recent news (24h):\n");
             for (NewsItem n : ctx.news()) {
                 sb.append("  - ").append(n.headline()).append(" (").append(n.source()).append(")\n");
             }

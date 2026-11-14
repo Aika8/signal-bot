@@ -8,6 +8,7 @@ import io.github.signalbot.domain.model.PaperFill;
 import io.github.signalbot.domain.model.PriceSnapshot;
 import io.github.signalbot.domain.model.Verdict;
 import io.github.signalbot.domain.port.PaperWallet;
+import io.github.signalbot.execution.ExecutionResult.Outcome;
 import io.github.signalbot.persistence.ExecutionStore;
 import io.github.signalbot.persistence.ExecutionStore.ExecutionRow;
 import io.github.signalbot.persistence.PositionGuardStore;
@@ -16,10 +17,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 
 /**
  * Confirmation-gated execution. A verdict/exit becomes a PENDING row and a
@@ -38,10 +41,11 @@ public class ExecutionService {
     private final PositionGuardStore guardStore;
     private final TriggerEvaluator triggerEvaluator;
     private final ContextAssembler assembler;
+    private final TransactionOperations tx;
 
     public ExecutionService(ExecutionStore store, PaperWallet paperWallet, ObjectProvider<ExecutionGateway> gateway,
                             ExecutionProperties props, ExitGuard exitGuard, PositionGuardStore guardStore,
-                            TriggerEvaluator triggerEvaluator, ContextAssembler assembler) {
+                            TriggerEvaluator triggerEvaluator, ContextAssembler assembler, TransactionOperations tx) {
         this.store = store;
         this.paperWallet = paperWallet;
         this.gateway = gateway;
@@ -50,6 +54,7 @@ public class ExecutionService {
         this.guardStore = guardStore;
         this.triggerEvaluator = triggerEvaluator;
         this.assembler = assembler;
+        this.tx = tx;
     }
 
     public long submit(Verdict verdict, ExecutionSource source, BigDecimal refPrice) {
@@ -66,26 +71,37 @@ public class ExecutionService {
         return id;
     }
 
-    public void fill(long id, BigDecimal fillPrice) {
-        store.find(id).filter(r -> r.state() == ExecutionState.PENDING).ifPresentOrElse(
-                row -> applyFill(row, fillPrice),
-                () -> LOG.info("Execution {} not pending; fill ignored", id));
+    public Optional<ExecutionState> state(long id) {
+        return store.find(id).map(ExecutionRow::state);
+    }
+
+    public ExecutionResult fill(long id, BigDecimal fillPrice) {
+        Optional<ExecutionRow> row = store.find(id);
+        if (row.isEmpty() || row.get().state() != ExecutionState.PENDING) {
+            return unchanged(id, row);
+        }
+        return applyFill(row.get(), fillPrice);
     }
 
     /** Fill at the current last price (operator replied "ok", or AUTO mode). */
-    public void fillAtLastPrice(long id) {
-        store.find(id).filter(r -> r.state() == ExecutionState.PENDING).ifPresent(row -> {
-            PriceSnapshot snapshot = assembler.snapshot(row.symbol());
-            if (snapshot == null || snapshot.last() == null) {
-                LOG.warn("No last price for {}; cannot fill execution {}", row.symbol(), id);
-                return;
-            }
-            applyFill(row, snapshot.last());
-        });
+    public ExecutionResult fillAtLastPrice(long id) {
+        Optional<ExecutionRow> row = store.find(id);
+        if (row.isEmpty() || row.get().state() != ExecutionState.PENDING) {
+            return unchanged(id, row);
+        }
+        PriceSnapshot snapshot = assembler.snapshot(row.get().symbol());
+        if (snapshot == null || snapshot.last() == null) {
+            LOG.warn("No last price for {}; cannot fill execution {}", row.get().symbol(), id);
+            return new ExecutionResult(id, Outcome.NO_PRICE, ExecutionState.PENDING, null, null);
+        }
+        return applyFill(row.get(), snapshot.last());
     }
 
-    public void skip(long id, String reason) {
-        store.markSkipped(id, reason, Instant.now());
+    public ExecutionResult skip(long id, String reason) {
+        if (store.markSkipped(id, reason, Instant.now())) {
+            return new ExecutionResult(id, Outcome.SKIPPED, ExecutionState.SKIPPED, null, reason);
+        }
+        return unchanged(id, store.find(id));
     }
 
     public void sweep() {
@@ -93,34 +109,75 @@ public class ExecutionService {
         for (ExecutionRow row : store.findPending()) {
             Duration age = Duration.between(row.pushedAt(), now);
             if (props.mode() == ExecutionMode.AUTO && age.compareTo(props.autoFillDelay()) >= 0) {
-                fillAtLastPrice(row.id());
-            } else if (age.compareTo(props.timeout()) >= 0) {
-                store.markExpired(row.id(), now);
+                ExecutionResult result = fillAtLastPrice(row.id());
+                if (result.outcome() != Outcome.FILLED) {
+                    LOG.info("AUTO fill of execution {}: {}", row.id(), result.message());
+                }
+            } else if (age.compareTo(props.timeout()) >= 0 && store.markExpired(row.id(), now)) {
                 LOG.info("Execution {} EXPIRED ({} {} x{})", row.id(), row.action(), row.symbol(), row.quantity());
             }
         }
     }
 
-    private void applyFill(ExecutionRow row, BigDecimal fillPrice) {
+    /**
+     * PENDING -> FILLED, the paper trade, the fee and the persisted guard commit
+     * together or not at all. The conditional update decides the race between a
+     * Telegram reply and the AUTO sweeper: the loser sees 0 rows and books nothing;
+     * the unique execution_id on paper_trade backs this up.
+     */
+    private ExecutionResult applyFill(ExecutionRow row, BigDecimal fillPrice) {
         Instant now = Instant.now();
         long latencyMs = Duration.between(row.pushedAt(), now).toMillis();
-        store.markFilled(row.id(), fillPrice, row.quantity(), now, latencyMs);
         Verdict verdict = new Verdict(row.symbol(), row.action(), row.quantity(), fillPrice,
                 row.stop(), row.takeProfit(), 1.0, "manual fill", now.plus(Duration.ofMinutes(15)));
+        PaperFill fill;
         try {
-            PaperFill fill = paperWallet.applyAt(verdict, fillPrice);
-            store.recordFee(row.id(), fill.feeBreakdown());
-        } catch (Exception e) {
-            LOG.warn("Paper apply failed for execution {}: {}", row.id(), e.getMessage());
-            return;
+            fill = tx.execute(status -> {
+                if (!store.markFilled(row.id(), fillPrice, row.quantity(), now, latencyMs)) {
+                    return null;
+                }
+                PaperFill f = paperWallet.applyAt(verdict, fillPrice, row.id());
+                store.recordFee(row.id(), f.feeBreakdown());
+                if (row.action() == Action.BUY) {
+                    guardStore.upsert(row.symbol(), row.stop(), row.takeProfit());
+                } else {
+                    guardStore.delete(row.symbol());
+                }
+                return f;
+            });
+        } catch (RuntimeException e) {
+            return failed(row, e);
+        }
+        if (fill == null) {
+            return unchanged(row.id(), store.find(row.id()));
         }
         triggerEvaluator.setReferencePrice(row.symbol(), fillPrice, now);
         if (row.action() == Action.BUY) {
             exitGuard.arm(row.symbol(), row.stop(), row.takeProfit());
-            guardStore.upsert(row.symbol(), row.stop(), row.takeProfit());
         } else {
             exitGuard.disarm(row.symbol());
-            guardStore.delete(row.symbol());
         }
+        return new ExecutionResult(row.id(), Outcome.FILLED, ExecutionState.FILLED, fillPrice, null);
+    }
+
+    private ExecutionResult failed(ExecutionRow row, RuntimeException e) {
+        // The transaction rolled back. If someone else filled it meanwhile (unique
+        // execution_id), report that; otherwise park it as FAILED so AUTO does not retry forever.
+        Optional<ExecutionRow> current = store.find(row.id());
+        if (current.isPresent() && current.get().state() != ExecutionState.PENDING) {
+            return unchanged(row.id(), current);
+        }
+        String reason = e.getMessage();
+        LOG.error("Paper apply failed for execution {} ({} {} x{}): {}", row.id(), row.action(), row.symbol(),
+                row.quantity(), reason, e);
+        if (!store.markFailed(row.id(), reason, Instant.now())) {
+            return unchanged(row.id(), store.find(row.id()));
+        }
+        return new ExecutionResult(row.id(), Outcome.FAILED, ExecutionState.FAILED, null, reason);
+    }
+
+    private static ExecutionResult unchanged(long id, Optional<ExecutionRow> row) {
+        return row.map(r -> new ExecutionResult(id, Outcome.NOT_PENDING, r.state(), null, null))
+                .orElseGet(() -> new ExecutionResult(id, Outcome.NOT_FOUND, null, null, null));
     }
 }

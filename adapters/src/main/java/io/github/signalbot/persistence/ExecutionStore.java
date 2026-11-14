@@ -55,29 +55,40 @@ public class ExecutionStore {
         return db.sql("SELECT * FROM executions WHERE state = 'PENDING' ORDER BY pushed_at").query(this::map).list();
     }
 
-    public void markFilled(long id, BigDecimal fillPrice, BigDecimal fillQuantity, Instant resolvedAt, long latencyMs) {
-        db.sql("""
+    /** PENDING -> FILLED. Returns false if the row was not PENDING (already resolved by someone else). */
+    public boolean markFilled(long id, BigDecimal fillPrice, BigDecimal fillQuantity, Instant resolvedAt, long latencyMs) {
+        return db.sql("""
                         UPDATE executions SET state = 'FILLED', fill_price = :price, fill_quantity = :qty,
                             resolved_at = :resolved, latency_ms = :latency
                         WHERE id = :id AND state = 'PENDING'
                         """)
                 .param("price", fillPrice).param("qty", fillQuantity)
                 .param("resolved", java.sql.Timestamp.from(resolvedAt)).param("latency", latencyMs).param("id", id)
-                .update();
+                .update() == 1;
     }
 
-    public void markSkipped(long id, String reason, Instant resolvedAt) {
-        db.sql("UPDATE executions SET state = 'SKIPPED', skip_reason = :reason, resolved_at = :resolved "
+    /** PENDING -> SKIPPED. Returns false if the row was not PENDING. */
+    public boolean markSkipped(long id, String reason, Instant resolvedAt) {
+        return db.sql("UPDATE executions SET state = 'SKIPPED', skip_reason = :reason, resolved_at = :resolved "
                         + "WHERE id = :id AND state = 'PENDING'")
                 .param("reason", reason).param("resolved", java.sql.Timestamp.from(resolvedAt)).param("id", id)
-                .update();
+                .update() == 1;
     }
 
-    public void markExpired(long id, Instant resolvedAt) {
-        db.sql("UPDATE executions SET state = 'EXPIRED', resolved_at = :resolved "
+    /** PENDING -> EXPIRED. Returns false if the row was not PENDING. */
+    public boolean markExpired(long id, Instant resolvedAt) {
+        return db.sql("UPDATE executions SET state = 'EXPIRED', resolved_at = :resolved "
                         + "WHERE id = :id AND state = 'PENDING'")
                 .param("resolved", java.sql.Timestamp.from(resolvedAt)).param("id", id)
-                .update();
+                .update() == 1;
+    }
+
+    /** PENDING -> FAILED (paper wallet rejected the fill). Returns false if the row was not PENDING. */
+    public boolean markFailed(long id, String reason, Instant resolvedAt) {
+        return db.sql("UPDATE executions SET state = 'FAILED', skip_reason = :reason, resolved_at = :resolved "
+                        + "WHERE id = :id AND state = 'PENDING'")
+                .param("reason", reason).param("resolved", java.sql.Timestamp.from(resolvedAt)).param("id", id)
+                .update() == 1;
     }
 
     public List<Long> latenciesBetween(Instant from, Instant to) {

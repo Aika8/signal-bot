@@ -38,6 +38,19 @@ public class TelegramNotifier implements Notifier {
         }
     }
 
+    @Override
+    public void alert(String symbol, String message) {
+        if (props.chatId() == null || props.chatId().isBlank()) {
+            LOG.warn("No Telegram chat id configured; cannot push alert for {}: {}", symbol, message);
+            return;
+        }
+        try {
+            sender.send(bot, props.chatId(), "\u26a0\ufe0f " + symbol + " \u2014 " + message);
+        } catch (Exception e) {
+            LOG.warn("Failed to push alert for {}: {}", symbol, e.getMessage());
+        }
+    }
+
     private static String format(Verdict v, String contextSummary) {
         return new StringBuilder()
                 .append(v.action()).append(' ').append(v.symbol())

@@ -5,6 +5,7 @@ import io.github.signalbot.config.PortfolioSource;
 import io.github.signalbot.domain.model.Ccy;
 import io.github.signalbot.domain.model.Portfolio;
 import io.github.signalbot.domain.model.Venue;
+import io.github.signalbot.domain.port.SourceFailureException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -71,7 +72,25 @@ class FileReadersTest {
     @Test
     void missingFileFailsClearly(@TempDir Path dir) {
         AccountFileLoader loader = loader(dir.resolve("absent.yml"));
-        IllegalStateException e = assertThrows(IllegalStateException.class, () -> new FilePortfolioReader(loader).read());
+        SourceFailureException e = assertThrows(SourceFailureException.class, () -> new FilePortfolioReader(loader).read());
         assertTrue(e.getMessage().contains("not found"));
+    }
+
+    @Test
+    void missingSectionsFailInsteadOfZero(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("portfolio.yml");
+        Files.writeString(file, "other: 1\n");
+        AccountFileLoader loader = loader(file);
+        assertThrows(SourceFailureException.class, () -> new FilePortfolioReader(loader).read());
+        assertThrows(SourceFailureException.class, () -> new FileCashReader(loader).read());
+    }
+
+    @Test
+    void explicitEmptyCashIsNoCash(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("portfolio.yml");
+        Files.writeString(file, "portfolio:\n  totalValueKzt: 0\n  positions: []\ncash: []\n");
+        AccountFileLoader loader = loader(file);
+        assertTrue(new FileCashReader(loader).read().isEmpty());
+        assertTrue(new FilePortfolioReader(loader).read().positions().isEmpty());
     }
 }

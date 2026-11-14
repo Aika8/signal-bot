@@ -26,10 +26,23 @@ class ClaudePromptBuilderTest {
     void userPromptIncludesSymbolTriggerAndPrice() {
         DecisionContext ctx = new DecisionContext(
                 "AAPL", "price moved 3.5% within 15m", null, List.of(), List.of(),
-                new PriceSnapshot("AAPL", new BigDecimal("150"), new BigDecimal("145"), Instant.now()), null);
+                new PriceSnapshot("AAPL", new BigDecimal("150"), new BigDecimal("145"), Instant.now()), null, true);
         String u = builder.userPrompt(ctx);
         assertTrue(u.contains("AAPL"));
         assertTrue(u.contains("price moved 3.5%"));
         assertTrue(u.contains("150"));
+    }
+
+    @Test
+    void emptySectionsAreExplicitNotOmitted() {
+        DecisionContext none = new DecisionContext("AAPL", "news", null, List.of(), List.of(), null, null, true);
+        String u = builder.userPrompt(none);
+        assertTrue(u.contains("Positions: not available"));
+        assertTrue(u.contains("Cash: none"));
+        assertTrue(u.contains("Recent news (24h): none"));
+        assertTrue(u.contains("Last price: not available"));
+
+        DecisionContext noFeed = new DecisionContext("AAPL", "news", null, List.of(), List.of(), null, null, false);
+        assertTrue(builder.userPrompt(noFeed).contains("Recent news (24h): not available"));
     }
 }

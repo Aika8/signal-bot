@@ -6,6 +6,7 @@ import io.github.signalbot.domain.model.Portfolio;
 import io.github.signalbot.domain.model.Position;
 import io.github.signalbot.domain.model.Venue;
 import io.github.signalbot.domain.port.PortfolioReader;
+import io.github.signalbot.domain.port.SourceFailureException;
 import io.github.signalbot.file.FileDocument.FilePortfolio;
 import io.github.signalbot.file.FileDocument.FilePosition;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -32,7 +33,10 @@ public class FilePortfolioReader implements PortfolioReader {
     public Portfolio read() {
         FilePortfolio p = loader.load().portfolio();
         if (p == null) {
-            return new Portfolio(List.of(), BigDecimal.ZERO, Map.of(), Instant.now());
+            throw new SourceFailureException(AccountFileLoader.SOURCE, "'portfolio' section is missing");
+        }
+        if (p.totalValueKzt() == null) {
+            throw new SourceFailureException(AccountFileLoader.SOURCE, "'portfolio.totalValueKzt' is missing");
         }
         List<Position> positions = (p.positions() == null ? List.<FilePosition>of() : p.positions()).stream()
                 .map(FilePortfolioReader::toPosition)

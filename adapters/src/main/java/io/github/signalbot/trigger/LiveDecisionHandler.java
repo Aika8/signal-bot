@@ -12,6 +12,7 @@ import io.github.signalbot.domain.model.Portfolio;
 import io.github.signalbot.domain.model.Position;
 import io.github.signalbot.domain.model.Verdict;
 import io.github.signalbot.domain.port.DecisionEngine;
+import io.github.signalbot.domain.port.DecisionFailedException;
 import io.github.signalbot.domain.port.Notifier;
 import io.github.signalbot.execution.ExecutionService;
 import io.github.signalbot.execution.ExecutionSource;
@@ -68,8 +69,20 @@ public class LiveDecisionHandler {
             return;
         }
         String symbol = signal.symbol();
-        DecisionContext ctx = assembler.assemble(symbol, signal.reason(), lastVerdict.get(symbol));
-        Verdict verdict = engine.decide(ctx);
+        DecisionContext ctx;
+        Verdict verdict;
+        try {
+            ctx = assembler.assemble(symbol, signal.reason(), lastVerdict.get(symbol));
+        } catch (RuntimeException e) {
+            fail(symbol, "context unavailable (" + e.getMessage() + ")", e);
+            return;
+        }
+        try {
+            verdict = engine.decide(ctx);
+        } catch (DecisionFailedException e) {
+            fail(symbol, "decision failed (" + e.getMessage() + ")", e);
+            return;
+        }
         lastVerdict.put(symbol, verdict);
         Instant now = Instant.now();
 
@@ -129,6 +142,15 @@ public class LiveDecisionHandler {
                 .filter(p -> symbol.equals(p.secCode()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    /** No verdict is built: log at ERROR and tell the operator, never fall back to HOLD. */
+    private void fail(String symbol, String reason, Exception e) {
+        LOG.error("NO VERDICT for {}: {}", symbol, reason, e);
+        Notifier n = notifier.getIfAvailable();
+        if (n != null) {
+            n.alert(symbol, "NO VERDICT: " + reason);
+        }
     }
 
     private void notify(Verdict verdict, String summary) {

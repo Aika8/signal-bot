@@ -10,6 +10,7 @@ import io.github.signalbot.domain.port.CashReader;
 import io.github.signalbot.domain.port.MarketDataFeed;
 import io.github.signalbot.domain.port.NewsFeed;
 import io.github.signalbot.domain.port.PortfolioReader;
+import io.github.signalbot.domain.port.SourceFailureException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -18,8 +19,13 @@ import org.springframework.stereotype.Component;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Supplier;
 
-/** Assembles a {@link DecisionContext} for one trigger. Feeds are optional. */
+/**
+ * Assembles a {@link DecisionContext} for one trigger. Feeds are optional, but a
+ * configured feed that fails makes {@link #assemble} throw: a verdict is never
+ * built on silently missing data. A disabled feed is recorded as "not available".
+ */
 @Component
 public class ContextAssembler {
 
@@ -38,14 +44,21 @@ public class ContextAssembler {
         this.newsFeed = newsFeed;
     }
 
+    /** @throws SourceFailureException if any configured source fails */
     public DecisionContext assemble(String symbol, String reason, Verdict previousVerdict) {
-        Portfolio portfolio = portfolioReader.read();
-        List<CashBalance> cash = cashReader.read();
-        PriceSnapshot snapshot = snapshot(symbol);
-        List<NewsItem> news = recentNews(symbol);
-        return new DecisionContext(symbol, reason, portfolio, cash, news, snapshot, previousVerdict);
+        Portfolio portfolio = read("portfolio", portfolioReader::read);
+        List<CashBalance> cash = read("cash", cashReader::read);
+        PriceSnapshot snapshot = strictSnapshot(symbol);
+        NewsFeed feed = newsFeed.getIfAvailable();
+        List<NewsItem> news = feed == null ? List.of()
+                : read("news", () -> feed.newsSince(symbol, Instant.now().minus(Duration.ofHours(24))));
+        return new DecisionContext(symbol, reason, portfolio, cash, news, snapshot, previousVerdict, feed != null);
     }
 
+    /**
+     * Best-effort snapshot for execution and guard polling: null when the feed is
+     * disabled or fails (callers handle null explicitly). Not used for decisions.
+     */
     public PriceSnapshot snapshot(String symbol) {
         MarketDataFeed feed = marketData.getIfAvailable();
         if (feed == null) {
@@ -59,16 +72,25 @@ public class ContextAssembler {
         }
     }
 
-    private List<NewsItem> recentNews(String symbol) {
-        NewsFeed feed = newsFeed.getIfAvailable();
+    private PriceSnapshot strictSnapshot(String symbol) {
+        MarketDataFeed feed = marketData.getIfAvailable();
         if (feed == null) {
-            return List.of();
+            return null;
         }
+        PriceSnapshot s = read("market-data", () -> feed.snapshot(symbol));
+        if (s == null || s.last() == null) {
+            throw new SourceFailureException("market-data", "no last price for " + symbol);
+        }
+        return s;
+    }
+
+    private static <T> T read(String source, Supplier<T> call) {
         try {
-            return feed.newsSince(symbol, Instant.now().minus(Duration.ofHours(24)));
-        } catch (Exception e) {
-            LOG.warn("News fetch failed for {}: {}", symbol, e.getMessage());
-            return List.of();
+            return call.get();
+        } catch (SourceFailureException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new SourceFailureException(source, e.getMessage(), e);
         }
     }
 }

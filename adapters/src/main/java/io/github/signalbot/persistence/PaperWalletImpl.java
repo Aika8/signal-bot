@@ -66,7 +66,7 @@ public class PaperWalletImpl implements PaperWallet {
 
     @Override
     @Transactional
-    public PaperFill applyAt(Verdict verdict, BigDecimal fillPrice) {
+    public PaperFill applyAt(Verdict verdict, BigDecimal fillPrice, Long executionId) {
         if (!verdict.isTrade()) {
             throw new IllegalArgumentException("HOLD verdicts are not executable");
         }
@@ -74,11 +74,12 @@ public class PaperWalletImpl implements PaperWallet {
         Ccy ccy = existing.map(PaperPositionRow::priceCurrency).orElse(Ccy.USD);
         Venue venue = existing.map(PaperPositionRow::venue).orElse(Venue.US);
         return verdict.action() == Action.BUY
-                ? buy(verdict, fillPrice, ccy, venue, existing)
-                : sell(verdict, fillPrice, ccy, venue, existing);
+                ? buy(verdict, fillPrice, ccy, venue, existing, executionId)
+                : sell(verdict, fillPrice, ccy, venue, existing, executionId);
     }
 
-    private PaperFill buy(Verdict v, BigDecimal fillPrice, Ccy ccy, Venue venue, Optional<PaperPositionRow> existing) {
+    private PaperFill buy(Verdict v, BigDecimal fillPrice, Ccy ccy, Venue venue, Optional<PaperPositionRow> existing,
+                          Long executionId) {
         BigDecimal qty = v.quantity();
         BigDecimal notionalKzt = kzt(fx.toKzt(fillPrice.multiply(qty), ccy));
         FeeBreakdown fee = feeModel.compute(venue, qty, notionalKzt);
@@ -92,11 +93,12 @@ public class PaperWalletImpl implements PaperWallet {
         positions.upsert(updated);
 
         ledger.insertTrade(new TradeRecord(v.symbol(), Action.BUY, qty, fillPrice,
-                fee.totalKzt(), notionalKzt, BigDecimal.ZERO, BigDecimal.ZERO, ccy, v.symbol(), now));
+                fee.totalKzt(), notionalKzt, BigDecimal.ZERO, BigDecimal.ZERO, ccy, v.symbol(), now, executionId));
         return new PaperFill(v.symbol(), Action.BUY, qty, fillPrice, fee, BigDecimal.ZERO, BigDecimal.ZERO, now);
     }
 
-    private PaperFill sell(Verdict v, BigDecimal fillPrice, Ccy ccy, Venue venue, Optional<PaperPositionRow> existing) {
+    private PaperFill sell(Verdict v, BigDecimal fillPrice, Ccy ccy, Venue venue, Optional<PaperPositionRow> existing,
+                           Long executionId) {
         PaperPositionRow pos = existing.orElseThrow(
                 () -> new IllegalStateException("No position to sell for " + v.symbol()));
         BigDecimal qty = v.quantity().min(pos.quantity());
@@ -116,7 +118,7 @@ public class PaperWalletImpl implements PaperWallet {
 
         Instant now = Instant.now();
         long id = ledger.insertTrade(new TradeRecord(v.symbol(), Action.SELL, qty, fillPrice,
-                fee.totalKzt(), notionalKzt, realizedKzt, taxKzt, ccy, v.symbol(), now));
+                fee.totalKzt(), notionalKzt, realizedKzt, taxKzt, ccy, v.symbol(), now, executionId));
         if (taxKzt.signum() > 0) {
             ledger.accrueTax(id, realizedKzt, taxKzt);
         }

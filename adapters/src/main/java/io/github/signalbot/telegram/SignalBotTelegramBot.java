@@ -2,7 +2,9 @@ package io.github.signalbot.telegram;
 
 import io.github.signalbot.application.account.AccountQueryService;
 import io.github.signalbot.config.PortfolioProperties;
+import io.github.signalbot.execution.ExecutionResult;
 import io.github.signalbot.execution.ExecutionService;
+import io.github.signalbot.execution.ExecutionState;
 import io.github.signalbot.persistence.DailyPnlStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,16 +86,21 @@ public class SignalBotTelegramBot extends TelegramLongPollingBot {
 
     private void resolveFillPrice(String chatId, long executionId, String text) throws Exception {
         if (text.equalsIgnoreCase("ok")) {
-            awaitingPrice.remove(chatId);
-            executionService.fillAtLastPrice(executionId);
-            sender.send(this, chatId, "Filled at last price.");
+            ExecutionResult result = executionService.fillAtLastPrice(executionId);
+            if (result.outcome() != ExecutionResult.Outcome.NO_PRICE) {
+                awaitingPrice.remove(chatId);
+            }
+            sender.send(this, chatId, result.message());
             return;
         }
         try {
             BigDecimal price = new BigDecimal(text);
+            if (price.signum() <= 0) {
+                sender.send(this, chatId, "Price must be positive. Reply with a number, or 'ok' for last price.");
+                return;
+            }
             awaitingPrice.remove(chatId);
-            executionService.fill(executionId, price);
-            sender.send(this, chatId, "Filled at " + price + ".");
+            sender.send(this, chatId, executionService.fill(executionId, price).message());
         } catch (NumberFormatException e) {
             sender.send(this, chatId, "Invalid price. Reply with a number, or 'ok' for last price.");
         }
@@ -105,11 +112,17 @@ public class SignalBotTelegramBot extends TelegramLongPollingBot {
         execute(AnswerCallbackQuery.builder().callbackQueryId(query.getId()).build());
         long executionId = Long.parseLong(data.substring(data.lastIndexOf(':') + 1));
         if (data.startsWith("exec:FILL:")) {
+            ExecutionState state = executionService.state(executionId).orElse(null);
+            if (state != ExecutionState.PENDING) {
+                sender.send(this, chatId, state == null ? "Execution " + executionId + " not found."
+                        : "Execution " + executionId + " is already " + state + "; nothing changed.");
+                return;
+            }
             awaitingPrice.put(chatId, executionId);
             sender.send(this, chatId, "Reply with the fill price, or 'ok' for last price.");
         } else if (data.startsWith("exec:SKIP:")) {
-            executionService.skip(executionId, "skipped via Telegram");
-            sender.send(this, chatId, "Skipped.");
+            awaitingPrice.remove(chatId, executionId);
+            sender.send(this, chatId, executionService.skip(executionId, "skipped via Telegram").message());
         }
     }
 }

@@ -6,4 +6,7 @@ import io.github.signalbot.domain.model.Verdict;
 public interface Notifier {
 
     void send(Verdict verdict, String contextSummary);
+
+    /** Reports that no verdict could be built for a symbol (source or engine failure). */
+    void alert(String symbol, String message);
 }

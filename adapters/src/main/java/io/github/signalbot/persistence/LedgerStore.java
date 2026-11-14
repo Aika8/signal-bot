@@ -16,7 +16,7 @@ public class LedgerStore {
     public record TradeRecord(
             String secCode, Action action, BigDecimal quantity, BigDecimal fillPrice,
             BigDecimal feeKzt, BigDecimal notionalKzt, BigDecimal realizedGainKzt,
-            BigDecimal taxKzt, Ccy currency, String verdictSymbol, Instant filledAt) {
+            BigDecimal taxKzt, Ccy currency, String verdictSymbol, Instant filledAt, Long executionId) {
     }
 
     private final JdbcClient db;
@@ -29,9 +29,9 @@ public class LedgerStore {
         return db.sql("""
                         INSERT INTO paper_trade
                             (sec_code, action, quantity, fill_price, fee, notional,
-                             realized_gain, tax, currency, verdict_symbol, filled_at)
+                             realized_gain, tax, currency, verdict_symbol, filled_at, execution_id)
                         VALUES (:sec, :action, :qty, :price, :fee, :notional,
-                                :gain, :tax, :ccy, :verdict, :filledAt)
+                                :gain, :tax, :ccy, :verdict, :filledAt, :executionId)
                         RETURNING id
                         """)
                 .param("sec", t.secCode())
@@ -45,6 +45,7 @@ public class LedgerStore {
                 .param("ccy", t.currency().name())
                 .param("verdict", t.verdictSymbol())
                 .param("filledAt", java.sql.Timestamp.from(t.filledAt()))
+                .param("executionId", t.executionId(), java.sql.Types.BIGINT)
                 .query(Long.class)
                 .single();
     }

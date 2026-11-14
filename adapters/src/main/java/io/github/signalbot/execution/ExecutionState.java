@@ -5,5 +5,7 @@ public enum ExecutionState {
     PENDING,
     FILLED,
     SKIPPED,
-    EXPIRED
+    EXPIRED,
+    /** The paper wallet rejected the fill (e.g. no position to sell); nothing was booked. */
+    FAILED
 }

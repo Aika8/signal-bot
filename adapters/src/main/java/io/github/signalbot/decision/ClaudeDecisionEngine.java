@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.signalbot.domain.model.DecisionContext;
 import io.github.signalbot.domain.model.Verdict;
 import io.github.signalbot.domain.port.DecisionEngine;
+import io.github.signalbot.domain.port.DecisionFailedException;
 import io.github.signalbot.persistence.DecisionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,13 +15,17 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * Calls Claude once per trigger, parses a strict-JSON verdict (default HOLD on
- * any failure), and stores the request/response in the decisions table.
+ * Calls Claude once per trigger, parses a strict-JSON verdict and stores the
+ * request/response in the decisions table. If the call fails or the response
+ * is unusable, the attempt is stored with action {@code ERROR} and a
+ * {@link DecisionFailedException} is thrown: there is no fallback HOLD.
  * Loaded only when {@code signalbot.claude.enabled=true}.
  */
 @Component
 @ConditionalOnProperty(prefix = "signalbot.claude", name = "enabled", havingValue = "true")
 public class ClaudeDecisionEngine implements DecisionEngine {
+
+    static final String ERROR_ACTION = "ERROR";
 
     private static final Logger LOG = LoggerFactory.getLogger(ClaudeDecisionEngine.class);
 
@@ -48,21 +53,29 @@ public class ClaudeDecisionEngine implements DecisionEngine {
         try {
             responseText = claude.complete(system, user);
         } catch (Exception e) {
-            LOG.warn("Claude call failed for {}: {}; defaulting to HOLD", context.symbol(), e.getMessage());
-            responseText = null;
+            String reason = "Claude call failed: " + e.getMessage();
+            store(context, user, null, ERROR_ACTION, null, reason);
+            throw new DecisionFailedException(reason, e);
         }
 
-        ParsedVerdict parsed = parser.parse(responseText, context.symbol(), Instant.now());
-        store(context, user, responseText, parsed);
+        ParsedVerdict parsed;
+        try {
+            parsed = parser.parse(responseText, context.symbol(), Instant.now());
+        } catch (DecisionFailedException e) {
+            store(context, user, responseText, ERROR_ACTION, null, e.getMessage());
+            throw e;
+        }
+        store(context, user, responseText, parsed.verdict().action().name(),
+                parsed.verdict().confidence(), parsed.whatChanged());
         return parsed.verdict();
     }
 
-    private void store(DecisionContext ctx, String user, String responseText, ParsedVerdict parsed) {
+    private void store(DecisionContext ctx, String user, String responseText,
+                       String action, Double confidence, String note) {
         try {
             String request = objectMapper.writeValueAsString(Map.of("user", user));
             String response = objectMapper.writeValueAsString(Map.of("text", responseText == null ? "" : responseText));
-            decisions.record(ctx.symbol(), ctx.triggerReason(), request, response,
-                    parsed.verdict().action().name(), parsed.verdict().confidence(), parsed.whatChanged());
+            decisions.record(ctx.symbol(), ctx.triggerReason(), request, response, action, confidence, note);
         } catch (Exception e) {
             LOG.warn("Failed to persist decision for {}: {}", ctx.symbol(), e.getMessage());
         }
