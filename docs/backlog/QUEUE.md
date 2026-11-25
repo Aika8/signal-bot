@@ -22,6 +22,11 @@ Telegram or Claude (tests use fixtures and fakes); the **starting values** of `D
 cap 2 %, band 1.5–3 ATR, activation 2R, offset 1 ATR, spread 0.1 ATR) are used as written and never tuned (D-005);
 `./gradlew build` stays green.
 
+Mockito trap: `ExecutionServiceTest` stubs the existing `insertPending(…)` and verifies the existing 5-argument
+`promptExecution(…)` and `guardStore.upsert(…)` on mocks. A mock does not run a delegating or default method, so
+when a new overload is added (sizing, limit), the path without the new data must still call the **old** method.
+Run the whole `./gradlew build`, not only the task's verify.
+
 Code locations used below: `D` = `domain/src/main/java/io/github/signalbot/domain`,
 `A` = `application/src/main/java/io/github/signalbot/application`, `AD` = `adapters/src/main/java/io/github/signalbot`;
 tests mirror them under `src/test/java`.
@@ -291,16 +296,21 @@ Step 6 of the ATR plan (D-004, read it whole first). In `ExitGuard`:
 - status: todo
 - depends: SB-008, SB-012
 - size: S
-- paths: `adapters/src/main/java/io/github/signalbot/persistence/PositionGuardStore.java`, `adapters/src/main/java/io/github/signalbot/trigger/GuardLoader.java`, `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java`, `adapters/src/main/java/io/github/signalbot/execution/ExecutionService.java`, `adapters/src/test/java/io/github/signalbot/trigger/TrailingRestartTest.java`, `adapters/src/test/java/io/github/signalbot/persistence/PositionGuardTrailingIntegrationTest.java`
+- paths: `adapters/src/main/java/io/github/signalbot/persistence/PositionGuardStore.java`, `adapters/src/main/java/io/github/signalbot/trigger/GuardLoader.java`, `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java`, `adapters/src/main/java/io/github/signalbot/trigger/PriceStreamRunner.java`, `adapters/src/main/java/io/github/signalbot/trigger/SnapshotGuardPoller.java`, `adapters/src/main/java/io/github/signalbot/trigger/TrailingStateWriter.java`, `adapters/src/main/java/io/github/signalbot/execution/ExecutionService.java`, `adapters/src/test/java/io/github/signalbot/trigger/TrailingRestartTest.java`, `adapters/src/test/java/io/github/signalbot/persistence/PositionGuardTrailingIntegrationTest.java`
 - verify: `./gradlew build`
 - expect: green; a guard armed at a BUY fill with entry 100, stop 96, ATR 2 has activation 108, offset 2, spread 0.2; after "restart" (new ExitGuard + GuardLoader) an activated guard keeps its best price
 
 D-004 "Consequences". At a BUY fill (`ExecutionService`, where it now calls `exitGuard.arm(row.symbol(),
 row.stop(), row.takeProfit())`, switch to `armTrailing`): R = fill price − stop; activation = fill + 2R; offset = 1 × ATR; spread =
 0.1 × ATR (ATR from the execution's `SizingInfo`; no ATR → arm the stop only and log it). Persist them and
-`risk_kzt` in `position_guards` (V7 columns). `ExitGuardHandler` writes `best_price`/`activated` when they
-change (not on every tick: only on activation and on a new best). `GuardLoader` restores with
-`ExitGuard.restore` (rows without trailing columns — armed before V7 — keep the old `arm`). Claude's `takeProfit` is still stored on the execution for review but not armed.
+`risk_kzt` in `position_guards` (V7 columns) through a **new** `PositionGuardStore` method: the existing
+`guardStore.upsert(symbol, stop, takeProfit)` call stays exactly as it is (`ExecutionServiceTest` verifies it on a
+mock and is not edited); only the in-memory guard is armed with `armTrailing`. `ExitGuard.onPrice` is called by
+`PriceStreamRunner` and `SnapshotGuardPoller`, which only see fired signals; after each `onPrice` they hand the
+symbol to a small `TrailingStateWriter` that compares `exitGuard.state(symbol)` with the last saved one and
+writes `best_price`/`activated` only on activation and on a new best (not on every tick). `GuardLoader` restores with
+`ExitGuard.restore` when the trailing columns are set; otherwise it arms the **stop only** and ignores
+`take_profit` (no fixed take-profit is re-armed after a restart, D-004). Claude's `takeProfit` is still stored on the execution for review but not armed.
 
 ### SB-014 — A trailing exit becomes a SELL with a suggested limit
 - status: todo
@@ -318,7 +328,7 @@ execution before the prompt goes out (`ExecutionService.submit` inserts and prom
 
 ### SB-015 — Realised result in R for each closed trade
 - status: todo
-- depends: SB-013
+- depends: SB-008
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/review/**`, `adapters/src/main/java/io/github/signalbot/persistence/PaperWalletImpl.java`, `adapters/src/main/java/io/github/signalbot/persistence/TradeQueryStore.java`, `adapters/src/main/java/io/github/signalbot/persistence/ExecutionStore.java`, `application/src/test/java/io/github/signalbot/application/review/**`, `adapters/src/test/java/io/github/signalbot/persistence/ResultRIntegrationTest.java`
 - verify: `./gradlew build`
@@ -329,8 +339,12 @@ Pure `application/review/RMultiple.of(netResultKzt, riskKzt)` (scale 4, HALF_UP;
 empty, the trade is left out and the review says how many were left out). The paper wallet sets
 `paper_trade.result_r` on the trade that closes (or reduces) a position, using `executions.risk_kzt` of the BUY
 execution that opened it (SB-008) — not `position_guards`: `ExitGuardHandler` deletes the guard as soon as an
-exit fires, before the SELL fills, and a second BUY overwrites it. With several BUYs, use the sum of their 1R. And
-the net result after fees as the wallet already computes it — do not compute P&L a second way.
+exit fires, before the SELL fills, and a second BUY overwrites it. With several BUYs, use the sum of their 1R.
+Net result (fees are inside 1R, D-003): the wallet's existing `realizedKzt` (`PaperWalletImpl.sell`, before fees —
+reuse it, do not compute P&L a second way) − this SELL's `fee.totalKzt()` − the opening BUY executions'
+`fee_total` (V5) × sold qty / bought qty. Tax is not part of R. Write this definition in the Javadoc of
+`RMultiple`. Set `result_r` with an UPDATE by `execution_id` (`paper_trade.execution_id`, V6) through
+`TradeQueryStore`; `LedgerStore` is not in the paths.
 
 ### SB-016 — Expectancy in R in the nightly review
 - status: todo
