@@ -104,10 +104,11 @@ gap-up bar where `|high − prevClose|` is the largest term, a gap-down bar for 
 D-002 "Consequences": ATR moves from the `screen` CLI into `application` and is shared; the screener's ATR%
 column changes from a simple mean to Wilder's (a small, accepted change).
 
-- `ScreenMetrics.atrPercent` computes with `Atr.wilder(bars, 14)` (one rule in one place: no second ATR formula
-  stays in `screen`). Replace `screen/Bar.java` by `DailyBar` if that is simpler; `ScreenRunner` may then use
-  `AlpacaBarsMapper` (SB-002 is not a dependency, so only if it is already merged — otherwise keep the local
-  parsing but make a missing field an error, not `0`).
+- `ScreenMetrics.atrPercent` takes `List<DailyBar>` and computes with `Atr.wilder(bars, 14)` (one rule in one
+  place: no second ATR formula stays in `screen`). Keep `screen/Bar.java` and `advMillions(List<Bar>)` as they are
+  (`advMillionsAveragesVolume` builds `Bar` and is not rewritten); `ScreenRunner` parses each bar into a
+  `DailyBar` (date from `t`, open from `o`) and derives the `Bar` for ADV from it. It may use `AlpacaBarsMapper`
+  if SB-002 is already merged; otherwise it keeps its local parsing but a missing field is an error, not `0`.
 - No ATR (too few bars) → that symbol's row prints `ERROR no ATR (n bars)` as other errors already do.
 - `rewrites`: in `ScreenMetricsTest`, only `atrPercentIsMeanTrueRangeOverLast` changes (new name and new
   hand-computed expected value with ≥ 15 bars). The other tests in it stay as they are.
@@ -199,7 +200,7 @@ container setup of `PaperWalletIntegrationTest` (`@Testcontainers(disabledWithou
 
 ### SB-009 — Live path: ATR → stop → size → limits → submit
 - status: todo
-- depends: SB-002, SB-008
+- depends: SB-002, SB-008, SB-010
 - size: S
 - paths: `adapters/src/main/java/io/github/signalbot/trigger/LiveDecisionHandler.java`, `adapters/src/main/java/io/github/signalbot/config/**`, `application/src/main/java/io/github/signalbot/application/risk/RiskLimitEvaluator.java`, `adapters/src/test/java/io/github/signalbot/trigger/LiveDecisionHandlerAtrTest.java`, `application/src/test/java/io/github/signalbot/application/risk/RiskLimitEvaluatorTest.java`
 - rewrites: `application/src/test/java/io/github/signalbot/application/risk/RiskLimitEvaluatorTest.java`
@@ -215,7 +216,8 @@ the risk limits:
 2. `StopPolicy.forBuy(entry, verdict.stop(), atr)`; entry = snapshot last (as `refPrice` does today).
 3. `PositionSizer` with total value, `RiskLimits` risk %, FX via the existing `FxConverter`, estimated round-trip
    fees via the existing `FeeModel` (one rule in one place — do not re-implement fees), Claude's quantity,
-   concentration cap qty = floor((30 % × total − held value) / price in KZT), cash qty from `CashReader`.
+   concentration cap qty = floor((`RiskLimits.maxSingleSymbolPct` × total − held value) / price in KZT) — the
+   existing limit, not a new 30 % literal, cash qty from `CashReader`.
 4. Build the verdict to submit with the new stop and quantity; then `RiskLimitEvaluator` for the count checks;
    then `executionService.submit(…, SizingInfo)`. Log Claude's quantity when it was higher.
 
@@ -223,16 +225,24 @@ the risk limits:
 `RiskLimitEvaluatorTest` only `concentrationCapBlocksOversizedBuy` changes (it now expects "allowed"; rename it);
 every other test stays as it is. SELL: unchanged path (quantity capped at the held quantity, D-003).
 
+Existing tests are not edited: keep the current constructor of `LiveDecisionHandler` as a delegating one (with no
+price history, so a BUY is REJECTED "no ATR") and mark the new one `@Autowired`. `LiveDecisionHandlerTest`
+checks only the 3-argument `submit`; the new test also checks that the 4-argument `submit` is never called when the
+context or the decision fails.
+
 ### SB-010 — Telegram shows the stop, its source and 1R
 - status: todo
-- depends: SB-009
+- depends: SB-008
 - size: S
-- paths: `adapters/src/main/java/io/github/signalbot/telegram/TelegramExecutionGateway.java`, `adapters/src/main/java/io/github/signalbot/telegram/ExecutionPromptFormatter.java`, `adapters/src/test/java/io/github/signalbot/telegram/ExecutionPromptFormatterTest.java`
+- paths: `adapters/src/main/java/io/github/signalbot/telegram/TelegramExecutionGateway.java`, `adapters/src/main/java/io/github/signalbot/telegram/ExecutionPromptFormatter.java`, `adapters/src/main/java/io/github/signalbot/execution/**`, `adapters/src/test/java/io/github/signalbot/telegram/ExecutionPromptFormatterTest.java`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.telegram.*'`
 - expect: green; the prompt text of a BUY shows stop, `ATR`/`CLAUDE`, Claude's original stop when replaced, ATR and 1R in ₸; a SELL or exit prompt has no sizing lines
 
 Step 4 of the ATR plan, operator side (D-002: the substitution is visible and cancellable with **Skipped**).
-Move the text building of the execution prompt out of `TelegramExecutionGateway` into a pure
+It comes before SB-009 on purpose: once the live path replaces stops, the operator already sees it. The gateway
+gets the sizing facts either by reading the execution row by id (`ExecutionStore`) or through a
+`promptExecution` overload taking `SizingInfo` (existing calls and tests keep compiling). Move the text building
+of the execution prompt out of `TelegramExecutionGateway` into a pure
 `ExecutionPromptFormatter` (so it can be tested without Telegram) and add, when `SizingInfo` is present:
 `Stop 182.40 (ATR; Claude: 185.00)`, `ATR(14) 3.70`, `1R = 12 500 ₸ (qty 7)`, and the line
 "Skipped = do not take the trade". Keep every existing line and button as is. No live Telegram call in tests.
@@ -246,7 +256,9 @@ Move the text building of the execution prompt out of `TelegramExecutionGateway`
 - expect: green; the prompt has a line `ATR(14): 3.70 (2.1% of last)` or `ATR(14): not available`; all existing prompt and context tests pass unchanged
 
 Step 4 of the ATR plan, Claude side. `DecisionContext` gains a nullable `BigDecimal atr` (keep the old
-constructor as a delegating one so existing code and tests compile unchanged). `ContextAssembler` fills it from
+constructor as a delegating one so existing code and tests compile unchanged). The same for `ContextAssembler`:
+`ContextAssemblerTest` builds it with today's 4 arguments, so that constructor stays (delegating, no price
+history) and the new one is `@Autowired`. `ContextAssembler` fills it from
 `PriceHistory` + `Atr.wilder(…, 14)` when the bean exists; a failing history makes the ATR line "not available"
 (the ATR is context here, not a gate — the gate is SB-009), and that is logged. The prompt also says in one line
 that the stop must be 1.5–3 ATR below entry or code replaces it with 2 ATR (D-002).
@@ -255,16 +267,16 @@ that the stop must be 1.5–3 ATR below entry or code replaces it with 2 ATR (D-
 - status: todo
 - depends: SB-007
 - size: S
-- paths: `application/src/main/java/io/github/signalbot/application/trigger/**`, `application/src/test/java/io/github/signalbot/application/trigger/**`
-- rewrites: `application/src/test/java/io/github/signalbot/application/trigger/ExitGuardTest.java`
+- paths: `application/src/main/java/io/github/signalbot/application/trigger/**`, `application/src/test/java/io/github/signalbot/application/trigger/TrailingExitTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.trigger.*'`
 - expect: green; new `TrailingExitTest` covers: no tracking before activation, activation at the price, best rises, exit at `price < best − offset`, stop still fires after activation, a gap through both gives the stop, state round-trip
 
 Step 6 of the ATR plan (D-004, read it whole first). In `ExitGuard`:
 
-- `ExitType` gains `EXIT_TRAIL`; fixed-level TP (`EXIT_TP`) is no longer armed by new code (keep the enum value:
-  old rows may hold it).
-- `arm(symbol, stop, TrailingLevels trailing)` where `record TrailingLevels(BigDecimal activation,
+- `ExitType` gains `EXIT_TRAIL`. The existing `arm(symbol, stop, takeProfit)` and `EXIT_TP` stay untouched (the
+  callers in `adapters` and `ExitGuardTest` use them; SB-013 stops arming a fixed TP). New methods get new names,
+  so `arm(…, null)` calls stay unambiguous:
+- `armTrailing(symbol, stop, TrailingLevels trailing)` where `record TrailingLevels(BigDecimal activation,
   BigDecimal offset, BigDecimal spread)`; plus `restore(symbol, stop, trailing, BigDecimal best, boolean activated)`
   for the restart (SB-013). A method `state(symbol)` returns the current `best`/`activated` so the adapter can
   persist them.
@@ -273,8 +285,7 @@ Step 6 of the ATR plan (D-004, read it whole first). In `ExitGuard`:
   `price < best − offset`, `ExitSignal(EXIT_TRAIL, price, level = best − offset)`; fires once.
 - `ExitSignal` gains a nullable suggested limit: D-004 says limit = **breakout price − spread**, where the
   breakout price is the price that fired the exit (not `best − offset`).
-- `rewrites`: `ExitGuardTest.takeProfitFires` and `reArmsAfterNewVerdictUpdatesLevels` change from the fixed TP to
-  the trailing one; the other tests stay.
+- `ExitGuardTest` is not edited and stays green.
 
 ### SB-013 — Trailing state is armed at fill and survives a restart
 - status: todo
@@ -285,36 +296,40 @@ Step 6 of the ATR plan (D-004, read it whole first). In `ExitGuard`:
 - expect: green; a guard armed at a BUY fill with entry 100, stop 96, ATR 2 has activation 108, offset 2, spread 0.2; after "restart" (new ExitGuard + GuardLoader) an activated guard keeps its best price
 
 D-004 "Consequences". At a BUY fill (`ExecutionService`, where it now calls `exitGuard.arm(row.symbol(),
-row.stop(), row.takeProfit())`): R = fill price − stop; activation = fill + 2R; offset = 1 × ATR; spread =
+row.stop(), row.takeProfit())`, switch to `armTrailing`): R = fill price − stop; activation = fill + 2R; offset = 1 × ATR; spread =
 0.1 × ATR (ATR from the execution's `SizingInfo`; no ATR → arm the stop only and log it). Persist them and
 `risk_kzt` in `position_guards` (V7 columns). `ExitGuardHandler` writes `best_price`/`activated` when they
 change (not on every tick: only on activation and on a new best). `GuardLoader` restores with
-`ExitGuard.restore`. Claude's `takeProfit` is still stored on the execution for review but not armed.
+`ExitGuard.restore` (rows without trailing columns — armed before V7 — keep the old `arm`). Claude's `takeProfit` is still stored on the execution for review but not armed.
 
 ### SB-014 — A trailing exit becomes a SELL with a suggested limit
 - status: todo
 - depends: SB-013
 - size: S
-- paths: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java`, `adapters/src/main/java/io/github/signalbot/telegram/ExecutionPromptFormatter.java`, `adapters/src/main/java/io/github/signalbot/persistence/ExecutionStore.java`, `adapters/src/test/java/io/github/signalbot/trigger/TrailingExitHandlerTest.java`
+- paths: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java`, `adapters/src/main/java/io/github/signalbot/telegram/ExecutionPromptFormatter.java`, `adapters/src/main/java/io/github/signalbot/telegram/TelegramExecutionGateway.java`, `adapters/src/main/java/io/github/signalbot/execution/**`, `adapters/src/main/java/io/github/signalbot/persistence/ExecutionStore.java`, `adapters/src/test/java/io/github/signalbot/trigger/TrailingExitHandlerTest.java`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.trigger.*' --tests 'io.github.signalbot.telegram.*'`
 - expect: green; an `EXIT_TRAIL` signal at 110 with spread 0.2 creates a SELL execution (source EXIT) with ref price 110 and limit 109.80, and the prompt shows "limit 109.80"
 
 D-004: the exit is a SELL execution (`ExecutionSource.EXIT`) with `refPrice` = breakout price and suggested limit
 `breakout − spread` (stored in `executions.limit_price`, shown to the operator). Handle `EXIT_TRAIL` the same way
-`EXIT_STOP` is handled today (read `ExitGuardHandler`), only the limit is new.
+`EXIT_STOP` is handled today (read `ExitGuardHandler`), only the limit is new. The limit must be stored with the
+execution before the prompt goes out (`ExecutionService.submit` inserts and prompts at once): pass it into
+`submit` (an overload) rather than updating the row afterwards.
 
 ### SB-015 — Realised result in R for each closed trade
 - status: todo
 - depends: SB-013
 - size: S
-- paths: `application/src/main/java/io/github/signalbot/application/review/**`, `adapters/src/main/java/io/github/signalbot/persistence/PaperWalletImpl.java`, `adapters/src/main/java/io/github/signalbot/persistence/TradeQueryStore.java`, `application/src/test/java/io/github/signalbot/application/review/**`, `adapters/src/test/java/io/github/signalbot/persistence/ResultRIntegrationTest.java`
+- paths: `application/src/main/java/io/github/signalbot/application/review/**`, `adapters/src/main/java/io/github/signalbot/persistence/PaperWalletImpl.java`, `adapters/src/main/java/io/github/signalbot/persistence/TradeQueryStore.java`, `adapters/src/main/java/io/github/signalbot/persistence/ExecutionStore.java`, `application/src/test/java/io/github/signalbot/application/review/**`, `adapters/src/test/java/io/github/signalbot/persistence/ResultRIntegrationTest.java`
 - verify: `./gradlew build`
 - expect: green; a closing SELL of a position opened with 1R = 10 000 ₸ and a net result of −13 000 ₸ stores result_r = −1.3000 (a loss beyond 1R is recorded, not clipped — D-002 "Known limits")
 
 Step 7 of the ATR plan, part 1 (D-003: "realised result of each closed trade is stored in R").
 Pure `application/review/RMultiple.of(netResultKzt, riskKzt)` (scale 4, HALF_UP; riskKzt null or ≤ 0 →
 empty, the trade is left out and the review says how many were left out). The paper wallet sets
-`paper_trade.result_r` on the trade that closes (or reduces) a position, using `risk_kzt` of its guard (V7) and
+`paper_trade.result_r` on the trade that closes (or reduces) a position, using `executions.risk_kzt` of the BUY
+execution that opened it (SB-008) — not `position_guards`: `ExitGuardHandler` deletes the guard as soon as an
+exit fires, before the SELL fills, and a second BUY overwrites it. With several BUYs, use the sum of their 1R. And
 the net result after fees as the wallet already computes it — do not compute P&L a second way.
 
 ### SB-016 — Expectancy in R in the nightly review
@@ -353,7 +368,7 @@ and the report.
 ### SB-101 — No port can place an order
 - status: todo
 - size: S
-- paths: `domain/src/test/java/io/github/signalbot/domain/NoOrderPortTest.java`
+- paths: `domain/src/test/java/io/github/signalbot/domain/NoOrderPortTest.java`, `docs/backlog/reports/SB-101.md`
 - verify: `./gradlew :domain:test --tests 'io.github.signalbot.domain.NoOrderPortTest'`
 - expect: green; the test fails if any interface in `io.github.signalbot.domain.port` declares a method whose name contains `order`, `place`, `submit` or `trade` (case-insensitive) — `PaperWallet`'s methods are the listed exception, by exact name
 
@@ -365,7 +380,7 @@ loading each class by name; list the found methods in the failure message. Read 
 ### SB-102 — Domain and application stay framework-free
 - status: todo
 - size: S
-- paths: `application/src/test/java/io/github/signalbot/application/PurityTest.java`
+- paths: `application/src/test/java/io/github/signalbot/application/PurityTest.java`, `docs/backlog/reports/SB-102.md`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.PurityTest'`
 - expect: green; the test fails on any `import org.springframework`, `java.sql`, `java.net`, `jakarta.`, `com.anthropic` or `org.telegram` in `domain/src/main/java` or `application/src/main/java`
 
@@ -376,7 +391,7 @@ and lists every offending file:line. No new dependency (no ArchUnit: build files
 ### SB-103 — Price-move trigger at the 3 % edge
 - status: todo
 - size: S
-- paths: `application/src/test/java/io/github/signalbot/application/trigger/TriggerEdgeTest.java`
+- paths: `application/src/test/java/io/github/signalbot/application/trigger/TriggerEdgeTest.java`, `docs/backlog/reports/SB-103.md`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.trigger.TriggerEdgeTest'`
 - expect: green; exactly the threshold, just below, just above, a fall of the same size, and a zero/absent prior close are each pinned
 
@@ -386,7 +401,7 @@ test does not. Use the threshold from `TriggerSettings`, not a literal 3 %.
 ### SB-104 — Fees at their edges
 - status: todo
 - size: S
-- paths: `adapters/src/test/java/io/github/signalbot/persistence/FeeModelEdgeTest.java`
+- paths: `adapters/src/test/java/io/github/signalbot/persistence/FeeModelEdgeTest.java`, `docs/backlog/reports/SB-104.md`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.persistence.FeeModelEdgeTest'`
 - expect: green; one share, a fractional per-share result, the per-order minimum (if the model has one), a non-US venue at 0.1 %, and KZT conversion rounding are each pinned
 
@@ -396,7 +411,7 @@ out by hand in comments.
 ### SB-105 — The verdict parser never invents a verdict
 - status: todo
 - size: S
-- paths: `adapters/src/test/java/io/github/signalbot/decision/ClaudeVerdictParserRobustnessTest.java`
+- paths: `adapters/src/test/java/io/github/signalbot/decision/ClaudeVerdictParserRobustnessTest.java`, `docs/backlog/reports/SB-105.md`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.decision.ClaudeVerdictParserRobustnessTest'`
 - expect: green; empty text, prose without JSON, truncated JSON, a wrong action, a negative quantity, a confidence outside [0, 1], and 200 random strings (fixed seed) each throw `DecisionFailedException` — none yields a HOLD
 
@@ -406,7 +421,7 @@ first; add only cases the existing test lacks. Fixed `java.util.Random` seed so 
 ### SB-106 — Finnhub mappers fail loudly on bad bodies
 - status: todo
 - size: S
-- paths: `adapters/src/test/java/io/github/signalbot/news/FinnhubMalformedTest.java`
+- paths: `adapters/src/test/java/io/github/signalbot/news/FinnhubMalformedTest.java`, `docs/backlog/reports/SB-106.md`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.news.FinnhubMalformedTest'`
 - expect: green; a JSON object where a list is expected, a news item with no datetime, an earnings entry with a bad date each throw `SourceFailureException`; an empty list returns an empty list
 
@@ -415,7 +430,7 @@ D-001 for Finnhub. Read both mappers and `FinnhubMapperTest` first; add only mis
 ### SB-107 — Expired executions at the timeout edge
 - status: todo
 - size: S
-- paths: `adapters/src/test/java/io/github/signalbot/execution/ExecutionSweeperTest.java`
+- paths: `adapters/src/test/java/io/github/signalbot/execution/ExecutionSweeperTest.java`, `docs/backlog/reports/SB-107.md`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.execution.ExecutionSweeperTest'`
 - expect: green; a PENDING execution one millisecond before the timeout stays PENDING, at and after it becomes EXPIRED (or AUTO-filled in AUTO mode, as the code does); a FILLED one is never touched
 
@@ -426,7 +441,7 @@ in the report `docs/backlog/reports/SB-107.md` as a finding (do not change the c
 ### SB-108 — Portfolio messages with nothing or losses
 - status: todo
 - size: S
-- paths: `adapters/src/test/java/io/github/signalbot/telegram/PaperStateFormatterEdgeTest.java`
+- paths: `adapters/src/test/java/io/github/signalbot/telegram/PaperStateFormatterEdgeTest.java`, `docs/backlog/reports/SB-108.md`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.telegram.PaperStateFormatterEdgeTest'`
 - expect: green; no positions, a negative P&L, a zero cash balance and a symbol with a long name each format without an exception and show the sign of a loss
 

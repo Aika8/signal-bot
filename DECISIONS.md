@@ -164,6 +164,11 @@ Infrastructure choices made while preparing the cloud week; none changes how a v
 - **Testcontainers 1.21.4** (test scope; Boot 3.4.2 brings 1.20.4, which Docker 29 refuses). The two integration
   tests skip without Docker (`disabledWithoutDocker`), so a cloud session without Docker can run the build; CI
   checks Docker first and fails if any test was skipped.
+- **The worker no longer scans `io.github.signalbot.screen`.** The first CI run with Docker showed the integration
+  tests could never start: `ScreenApplication` (the `screen` CLI's own `@SpringBootApplication`, excluding the
+  datasource and Flyway) was picked up by the worker's component scan, Boot merged its excludes, and the worker
+  lost its `JdbcClient`; `ScreenRunner` would also have run the screener at worker startup. The CLI keeps its own
+  entry point (`./gradlew screen`).
 
 ## Backlog run (December 2026)
 

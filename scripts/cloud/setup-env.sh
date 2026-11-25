@@ -58,7 +58,8 @@ JDK=$(find_jdk21)
 if [ -n "$JDK" ] && [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   echo "export JAVA_HOME=$JDK" >> "$CLAUDE_ENV_FILE"
 fi
-echo "setup-env: java ${JDK:+21 at $JDK}${JDK:-MISSING}," \
-     "gradle $(ls "$HOME/.gradle/wrapper/dists" 2>/dev/null | head -1 || echo MISSING)," \
+GRADLE=$(ls "$HOME/.gradle/wrapper/dists" 2>/dev/null | head -1)
+echo "setup-env: java ${JDK:+21 at }${JDK:-MISSING}," \
+     "gradle ${GRADLE:-MISSING}," \
      "docker $(docker info --format '{{.ServerVersion}}' 2>/dev/null || echo absent) (log $LOG)"
 exit 0
