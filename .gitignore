@@ -32,3 +32,6 @@ Thumbs.db
 # Secrets and private parts — never commit
 .env.*
 !.env.example
+
+# Python
+__pycache__/

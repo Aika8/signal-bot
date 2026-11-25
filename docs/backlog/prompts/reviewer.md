@@ -20,7 +20,8 @@ python3 scripts/backlog/backlog.py review-queue
 Permissions: you comment and label PRs without asking anyone. You never push, never merge: merging happens only
 through the automerge workflow after green CI and your pass.
 
-Use `gh api` (REST) only; `gh pr` does not work here. Read `CLAUDE.md` and the section "Rule for every run" of
+Long commands (Gradle) run in the foreground with the Bash tool's `timeout` set to 600000; never end your turn
+while a command is still running. Use `gh api` (REST) only; `gh pr` does not work here. Read `CLAUDE.md` and the section "Rule for every run" of
 `docs/backlog/README.md`.
 
 ## 1. Gather
@@ -32,7 +33,17 @@ gh api repos/Aika8/signal-bot/issues/<n>/comments      # earlier rounds, if k > 
 git fetch origin <branch> && git diff origin/main...origin/<branch>
 ```
 
-Check out the branch and run the task's `verify` command yourself; compare with `expect`. Do not trust the PR
+Check out the branch and run the task's `verify` command yourself; compare with `expect`.
+
+Tests in a vacuum: if the PR changes production code (`python3 scripts/backlog/backlog.py prod-changes --base
+origin/main` lists those files, Flyway migrations included; empty = a test-only task, skip this), put those files
+back to main with `git restore --source origin/main --worktree -- <files>` (it also removes files the PR added;
+`git checkout origin/main -- <files>` would fail on them), run the new tests, then restore the branch
+(`git restore --source <head sha> --worktree -- .`). The new tests must **fail** without the change and **pass**
+with it. A new test green both ways pins nothing: answer "no" to question 3. A compile error without the change
+(the PR adds the class or method the tests call) proves nothing: then keep the branch's code and break the new
+behaviour by one line instead (flip a comparison, drop a term), check that a new test fails, and undo the edit. Without Docker the Testcontainers tests
+skip: for them, read the test instead and say so in the evidence. Do not trust the PR
 description's claims; the diff and your own run are the evidence. (CI already ran `./gradlew build` with Docker; you need not repeat it. Never open `.env`.)
 
 ## 2. Judge with yes/no questions
@@ -72,6 +83,11 @@ Review round <k> of <task id>: **<pass|fail>**
 
 <for fail: what must change, per "no" answer, in one line each>
 
+Out of scope (tech debt): <problems outside this task: `where` — what — why it matters; or "none". Do not fail the
+review for them.>
+
+Experience: <2–3 lines: where this review stumbled and how it got past it>
+
 <!-- backlog-review round=<k> verdict=<pass|fail> sha=<head sha> -->
 EOF
 gh api -X POST repos/Aika8/signal-bot/issues/<n>/comments -F body=@/tmp/review.md
@@ -80,6 +96,14 @@ gh api -X POST repos/Aika8/signal-bot/issues/<n>/comments -F body=@/tmp/review.m
 - pass → `gh api -X POST repos/Aika8/signal-bot/issues/<n>/labels -f "labels[]=review:pass"`
 - fail → label `needs-fix` instead. If `fixes` is 2 or more (two fix rounds already used), label `parked`
   instead and write in the comment what Aika must decide.
+
+On a **pass** there is no fix round to turn "Out of scope" into files, so open one issue per finding:
+`gh api -X POST repos/Aika8/signal-bot/issues -f title="[tech-debt] <one line>" -F body=@/tmp/debt.md
+-f "labels[]=tech-debt"` (body in the format of `docs/backlog/TECH-DEBT.md`).
+
+Classify findings like the executor (`docs/backlog/TECH-DEBT.md`): a regression inside the change → a "no" answer;
+the task itself wrong → fail and say "park: <reason>"; outside the task → "Out of scope", not a failure. A new test
+that checks the wording of documentation is a "no" on question 3. Never read `docs/backlog/experience/`.
 
 Do not push commits, do not merge, do not edit the PR. Stop.
 

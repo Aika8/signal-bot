@@ -21,6 +21,8 @@ free minutes. The same scheme runs in `Aika8/learning-exchange`; `scripts/backlo
 | Run prompts | `docs/backlog/prompts/*.md` | Aika |
 | Environment check | `scripts/cloud/setup-env.sh`, run by the SessionStart hook in `.claude/settings.json` | Aika |
 | Reports of tasks | `docs/backlog/reports/*.md` | tasks that say so |
+| Tech debt found outside a task | `docs/backlog/TECH-DEBT.md` (format), `docs/backlog/tech-debt/*.md` (one file each) | runs add, never change |
+| Experience log, write-only | `docs/backlog/experience/*.md` — agents never read it | runs add; Aika reads |
 
 The merge gate refuses any agent PR that changes a file in the "Aika" rows, `CLAUDE.md`, `.gitignore`, a Gradle
 build file, `docker-compose.yml`, anything under `adapter-broker-private/` or `.env*`, an applied Flyway migration,
@@ -88,6 +90,11 @@ Aika is away and answers nothing. When a run meets a question the task and the f
    `DECISIONS.md` does not decide; deleting or renaming public things. Then do not do it: comment the question with
    2–3 options and a recommendation on the PR (or open an issue `[parked] <task id>: <question>` with the label
    `parked` when there is no PR), and stop. The next run takes the next task.
+
+Every run also: works at most 50 minutes (then WIP commit and park); parks instead of retrying when the same error
+comes back or a failure is unrelated to the task (infrastructure, network); refuses an incomplete or contradictory
+task by parking it ("missing: …" / "contradicts: …"); records problems outside its task in `docs/backlog/tech-debt/`
+instead of fixing them; adds a write-only note to `docs/backlog/experience/` when it opens or updates a PR.
 
 Never: ask in the chat and wait (nobody answers), weaken or delete a test to get green, touch a protected path,
 read `.env`, call a live API, spend money, sign up anywhere, give investment advice.
