@@ -68,7 +68,9 @@ resilience4j:
     instances:
       telegram: { max-attempts: 3, wait-duration: 500ms, enable-exponential-backoff: true, exponential-backoff-multiplier: 2 }
       alpaca:   { max-attempts: 3, wait-duration: 500ms, enable-exponential-backoff: true, exponential-backoff-multiplier: 2 }
-      finnhub:  { max-attempts: 3, wait-duration: 1s,    enable-exponential-backoff: true, exponential-backoff-multiplier: 2 }
+      # A malformed Finnhub body (SourceFailureException from the mappers) is not transient: don't burn quota retrying it.
+      finnhub:  { max-attempts: 3, wait-duration: 1s,    enable-exponential-backoff: true, exponential-backoff-multiplier: 2,
+                  ignore-exceptions: [ io.github.signalbot.domain.port.SourceFailureException ] }
       claude:   { max-attempts: 2, wait-duration: 2s,    enable-exponential-backoff: true, exponential-backoff-multiplier: 2 }
   circuitbreaker:
     instances:

@@ -7,7 +7,10 @@ import io.github.signalbot.domain.model.Position;
 import io.github.signalbot.domain.model.PriceSnapshot;
 import io.github.signalbot.domain.port.MarketDataFeed;
 import io.github.signalbot.domain.port.PortfolioReader;
+import io.github.signalbot.domain.port.SourceFailureException;
 import io.github.signalbot.persistence.PositionStore.PaperPositionRow;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -19,10 +22,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/** Builds a {@link Portfolio} from the paper positions and cash. Read-only. */
+/**
+ * Builds a {@link Portfolio} from the paper positions and cash. Read-only.
+ *
+ * <p>Pricing: with a market-data feed configured, every position must get a last
+ * price; a failed or empty snapshot throws {@link SourceFailureException} instead
+ * of silently valuing the position at its entry price (which would show zero P&amp;L).
+ * Only when no feed is configured at all (offline/dry-run) are positions valued
+ * at cost, and that is logged.
+ */
 @Component
 @ConditionalOnProperty(prefix = "signalbot.portfolio", name = "source", havingValue = "paper", matchIfMissing = true)
 public class PaperPortfolioReader implements PortfolioReader {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PaperPortfolioReader.class);
 
     private final PositionStore positions;
     private final CashStore cash;
@@ -68,9 +81,19 @@ public class PaperPortfolioReader implements PortfolioReader {
 
     private BigDecimal lastPrice(MarketDataFeed feed, PaperPositionRow row) {
         if (feed == null) {
+            LOG.debug("No market-data feed; valuing {} at cost {}", row.secCode(), row.avgEntryPrice());
             return row.avgEntryPrice();
         }
-        PriceSnapshot snapshot = feed.snapshot(row.secCode());
-        return snapshot != null && snapshot.last() != null ? snapshot.last() : row.avgEntryPrice();
+        PriceSnapshot snapshot;
+        try {
+            snapshot = feed.snapshot(row.secCode());
+        } catch (RuntimeException e) {
+            throw new SourceFailureException("market-data", "snapshot failed for " + row.secCode()
+                    + ": " + e.getMessage(), e);
+        }
+        if (snapshot == null || snapshot.last() == null) {
+            throw new SourceFailureException("market-data", "no last price for " + row.secCode());
+        }
+        return snapshot.last();
     }
 }

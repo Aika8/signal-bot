@@ -2,6 +2,7 @@ package io.github.signalbot.telegram;
 
 import io.github.signalbot.application.account.AccountQueryService;
 import io.github.signalbot.config.PortfolioProperties;
+import io.github.signalbot.domain.port.SourceFailureException;
 import io.github.signalbot.execution.ExecutionResult;
 import io.github.signalbot.execution.ExecutionService;
 import io.github.signalbot.execution.ExecutionState;
@@ -75,12 +76,17 @@ public class SignalBotTelegramBot extends TelegramLongPollingBot {
             resolveFillPrice(chatId, awaitingId, text);
             return;
         }
-        switch (text) {
-            case "/portfolio" -> sender.send(this, chatId,
-                    "Source: " + portfolio.source() + "\n" + formatter.format(accountQuery.snapshot()));
-            case "/pnl" -> sender.send(this, chatId,
-                    formatter.formatPnl(accountQuery.snapshot(), dailyPnl.realizedOn(LocalDate.now(ALMATY))));
-            default -> { /* ignore */ }
+        try {
+            switch (text) {
+                case "/portfolio" -> sender.send(this, chatId,
+                        "Source: " + portfolio.source() + "\n" + formatter.format(accountQuery.snapshot()));
+                case "/pnl" -> sender.send(this, chatId,
+                        formatter.formatPnl(accountQuery.snapshot(), dailyPnl.realizedOn(LocalDate.now(ALMATY))));
+                default -> { /* ignore */ }
+            }
+        } catch (SourceFailureException e) {
+            LOG.error("{} failed: {}", text, e.getMessage(), e);
+            sender.send(this, chatId, "\u26a0\ufe0f " + text + " unavailable: " + e.getMessage());
         }
     }
 
