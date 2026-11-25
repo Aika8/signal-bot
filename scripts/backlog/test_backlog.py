@@ -275,6 +275,29 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class ProductionFilesTest(unittest.TestCase):
+    def test_tests_and_docs_are_not_production(self):
+        for p in ["backend/engine/src/test/java/engine/X.java", "clients/mobile/test/a.test.mjs", "DECISIONS.md",
+                  "docs/backlog/tech-debt/x.md", "game3d/tests/unit/test_x.gd", "game3d/tools/test_check_data.py"]:
+            self.assertFalse(b.is_production(p), p)
+        for p in ["backend/engine/src/main/java/engine/OrderBook.java", "game3d/scripts/core/goals.gd",
+                  "clients/mobile/src/statement.ts", "api/openapi.yaml"]:
+            self.assertTrue(b.is_production(p), p)
+
+
+class DebtAndExperienceTest(unittest.TestCase):
+    def test_task_may_add_but_not_change_debt_and_experience_files(self):
+        tasks = b.parse_tasks(QUEUE)
+        ok = b.check_paths("claude/le-001", [b.Change("added", "docs/backlog/tech-debt/2026-12-03-LE-001-1.md"),
+                                             b.Change("added", "docs/backlog/experience/2026-12-03-LE-001-0912.md")],
+                           tasks)
+        self.assertEqual(ok, [])
+        bad = b.check_paths("claude/le-001", [b.Change("modified", "docs/backlog/experience/2026-12-02-LE-000-0800.md")],
+                            tasks)
+        self.assertTrue(any("existing" in x for x in bad))
+        self.assertTrue(b.check_paths("claude/le-001", [b.Change("modified", "docs/backlog/TECH-DEBT.md")], tasks))
+
+
 class HardeningTest(unittest.TestCase):
     """Holes found by the independent review of 2026-11-25."""
 

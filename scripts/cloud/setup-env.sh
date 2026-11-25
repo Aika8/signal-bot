@@ -30,6 +30,14 @@ find_jdk21() {
   return 1
 }
 
+# Every run, first (before the slow part, so a hook timeout cannot skip it): commits made in the cloud carry Aika's name and her GitHub
+# no-reply address, not an AI identity (CLAUDE.md: no AI attribution). The attribution trailers themselves are off
+# in .claude/settings.json.
+GIT_NAME="Aika"
+GIT_EMAIL="52049894+Aika8@users.noreply.github.com"
+git config --global user.name "$GIT_NAME" 2>/dev/null || true
+git config --global user.email "$GIT_EMAIL" 2>/dev/null || true
+
 {
 echo "setup-env: start $(date -u +%FT%TZ)"
 JDK=$(find_jdk21)
@@ -53,14 +61,6 @@ EOF
 fi
 echo "setup-env: done $(date -u +%FT%TZ)"
 } >> "$LOG" 2>&1
-
-# Every run (also when everything is already in place): commits made in the cloud carry Aika's name and her GitHub
-# no-reply address, not an AI identity (CLAUDE.md: no AI attribution). The attribution trailers themselves are off
-# in .claude/settings.json.
-GIT_NAME="Aika"
-GIT_EMAIL="52049894+Aika8@users.noreply.github.com"
-git config --global user.name "$GIT_NAME" 2>/dev/null || true
-git config --global user.email "$GIT_EMAIL" 2>/dev/null || true
 
 JDK=$(find_jdk21)
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then

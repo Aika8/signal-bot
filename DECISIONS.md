@@ -157,7 +157,9 @@ Infrastructure choices made while preparing the cloud week; none changes how a v
   (40 → 20). signal-bot adds rows to `PROTECTED` / `APPEND_ONLY` / `INTAKE_DENY` (build files,
   `adapter-broker-private/**`, Flyway migrations, `.gitignore`, `docker-compose.yml`, `portfolio.yml`) and the task
   field `rewrites` (tests in `test_backlog_signalbot.py`). A shared library for both repositories comes later;
-  until then a fix in one copy is ported to the other by hand.
+  until then a fix in one copy is ported to the other by hand. Synced with learning-exchange `main` after its
+  PR #55 (tech-debt register, write-only experience log, `prod-changes`) on 2026-11-25; signal-bot additionally
+  counts Flyway migrations as production for the reviewer's "tests in a vacuum" check.
 - **`rewrites`**: steps of the ATR plan change behaviour that existing tests pin (simple-mean ATR in the screener,
   concentration rejection, fixed take-profit). Such a task names the one test file it may edit; anything else in
   `src/test` stays append-only, and intake never copies the field.

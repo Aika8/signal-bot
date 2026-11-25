@@ -85,6 +85,16 @@ class SignalBotRulesTest(unittest.TestCase):
             added = b.parse_tasks((root / b.QUEUE).read_text(encoding="utf-8"))[-1]
             self.assertEqual(added.rewrites, [])
 
+    def test_migrations_are_production_for_the_vacuum_check(self):
+        self.assertTrue(b.is_production("adapters/src/main/resources/db/migration/V7__x.sql"))
+        self.assertFalse(b.is_production("adapters/src/test/java/io/github/signalbot/persistence/XTest.java"))
+        self.assertTrue(b.is_production("application/src/main/java/io/github/signalbot/application/risk/Atr.java"))
+
+    def test_debt_and_experience_files_may_be_added_by_any_task(self):
+        ok = self.check("claude/sb-002", ("added", "docs/backlog/tech-debt/2026-12-03-SB-002-1.md"),
+                        ("added", "docs/backlog/experience/2026-12-03-SB-002-0912.md"))
+        self.assertEqual(ok, [])
+
     def test_build_files_never_come_through_intake(self):
         p = b.parse_proposals("### X\n- size: S\n- paths: `adapters/build.gradle.kts`\n- verify: `x`\n- expect: y\n\nd\n")[0]
         self.assertTrue(any("protected" in x for x in b.proposal_problems(p, self.tasks)))
