@@ -30,6 +30,9 @@ Never open, print or `cat` `.env` (it does not exist in a clone; do not create i
 | `REBASE #n` | Section 3. |
 | `PARK #n` | Section 4. |
 
+Long commands (`./gradlew build` takes minutes): run them in the foreground with the Bash tool's `timeout`
+set to 600000, wait for the result, and never end your turn while a command is still running.
+
 Permissions: in this repository you commit, push to `claude/*` branches and open PRs without asking anyone —
 that is the job. You never push to `main` and never merge: merging happens only through the automerge workflow,
 after green CI and the independent review.
@@ -73,8 +76,9 @@ after green CI and the independent review.
    python3 scripts/backlog/backlog.py check-paths --branch "$(git branch --show-current)" --base origin/main
    ```
    If you cannot get there within about 45 minutes of work, park (section 4) instead of pushing something broken.
-8. Commit in small logical commits; messages in English, imperative, no AI attribution of any kind (no
-   `Co-Authored-By`, no "Generated with"). `git push -u origin HEAD`.
+8. Before committing, `git config user.name` must print `Aika` (the setup script sets it; if not, run
+   `bash scripts/cloud/setup-env.sh` again). Commit in small logical commits; messages in English, imperative, no
+   AI attribution of any kind (no `Co-Authored-By`, no "Generated with"). `git push -u origin HEAD`.
 9. Open the PR and label it:
    ```bash
    cat > /tmp/pr.md <<'EOF'
@@ -89,6 +93,8 @@ after green CI and the independent review.
    gh api -X POST repos/Aika8/signal-bot/pulls -f title="<id>: <title>" -f head="<branch>" -f base=main -F body=@/tmp/pr.md
    gh api -X POST repos/Aika8/signal-bot/issues/<number>/labels -f "labels[]=agent"
    ```
+   Read the PR body back (`gh api repos/Aika8/signal-bot/pulls/<number> -q .body`): if any line names Claude,
+   Claude Code or a session link, remove it with `gh api -X PATCH repos/Aika8/signal-bot/pulls/<number> -F body=@/tmp/pr.md`.
    Then stop. You never merge, approve or label `review:pass` — the reviewer and the merge workflow do that.
 
 ## 2. FIX or CI-RED: one fix round on an open PR

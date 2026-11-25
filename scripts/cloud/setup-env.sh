@@ -54,12 +54,23 @@ fi
 echo "setup-env: done $(date -u +%FT%TZ)"
 } >> "$LOG" 2>&1
 
+# Every run (also when everything is already in place): commits made in the cloud carry Aika's name and her GitHub
+# no-reply address, not an AI identity (CLAUDE.md: no AI attribution). The attribution trailers themselves are off
+# in .claude/settings.json.
+GIT_NAME="Aika"
+GIT_EMAIL="52049894+Aika8@users.noreply.github.com"
+git config --global user.name "$GIT_NAME" 2>/dev/null || true
+git config --global user.email "$GIT_EMAIL" 2>/dev/null || true
+
 JDK=$(find_jdk21)
-if [ -n "$JDK" ] && [ -n "${CLAUDE_ENV_FILE:-}" ]; then
-  echo "export JAVA_HOME=$JDK" >> "$CLAUDE_ENV_FILE"
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  { [ -n "$JDK" ] && echo "export JAVA_HOME=$JDK"
+    echo "export GIT_AUTHOR_NAME='$GIT_NAME' GIT_AUTHOR_EMAIL='$GIT_EMAIL'"
+    echo "export GIT_COMMITTER_NAME='$GIT_NAME' GIT_COMMITTER_EMAIL='$GIT_EMAIL'"; } >> "$CLAUDE_ENV_FILE"
 fi
 GRADLE=$(ls "$HOME/.gradle/wrapper/dists" 2>/dev/null | head -1)
-echo "setup-env: java ${JDK:+21 at }${JDK:-MISSING}," \
+DOCKER=$(docker info --format '{{.ServerVersion}}' 2>/dev/null | tr -d '\n')
+echo "setup-env: java ${JDK:+21 at }${JDK:-MISSING}, git author $(git config --global user.name 2>/dev/null)," \
      "gradle ${GRADLE:-MISSING}," \
-     "docker $(docker info --format '{{.ServerVersion}}' 2>/dev/null || echo absent) (log $LOG)"
+     "docker ${DOCKER:-absent} (log $LOG)"
 exit 0

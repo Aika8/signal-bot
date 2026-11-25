@@ -20,7 +20,8 @@ python3 scripts/backlog/backlog.py review-queue
 Permissions: you comment and label PRs without asking anyone. You never push, never merge: merging happens only
 through the automerge workflow after green CI and your pass.
 
-Use `gh api` (REST) only; `gh pr` does not work here. Read `CLAUDE.md` and the section "Rule for every run" of
+Long commands (Gradle) run in the foreground with the Bash tool's `timeout` set to 600000; never end your turn
+while a command is still running. Use `gh api` (REST) only; `gh pr` does not work here. Read `CLAUDE.md` and the section "Rule for every run" of
 `docs/backlog/README.md`.
 
 ## 1. Gather
