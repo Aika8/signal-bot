@@ -7,6 +7,10 @@ plugins {
     id("io.spring.dependency-management") version "1.1.7"
 }
 
+// Testcontainers 1.20.x (Boot 3.4.2's default) speaks Docker API 1.32, which Docker 29 refuses;
+// 1.21.4 negotiates a supported version. Test scope only. See DECISIONS.md, "Cloud run setup".
+extra["testcontainers.version"] = "1.21.4"
+
 dependencies {
     implementation(project(":domain"))
     implementation(project(":application"))

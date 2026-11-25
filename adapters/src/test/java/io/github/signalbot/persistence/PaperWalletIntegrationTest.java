@@ -32,7 +32,7 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest
 @Import(PaperWalletIntegrationTest.FakeFeedConfig.class)
 class PaperWalletIntegrationTest {
