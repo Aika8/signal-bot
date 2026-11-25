@@ -1,0 +1,42 @@
+# CI: `./gradlew build` (compile + all tests, the Testcontainers ones included) on Java 21, plus the backlog rules'
+# own tests. Docker is checked first: the integration tests skip themselves without Docker (so a cloud session
+# without Docker can still run the build), and this check makes sure CI never skips them silently.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The automerge workflow re-runs CI on a branch it brought up to date with main (pushes made with GITHUB_TOKEN
+  # start no workflow by themselves). See docs/backlog/README.md.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker must be there (the integration tests run here, not skipped)
+        run: docker info --format 'docker {{.ServerVersion}}'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew build --console=plain
+      - name: No test was skipped
+        run: |
+          skipped=$(grep -ho 'skipped="[0-9]*"' */build/test-results/test/*.xml | grep -v 'skipped="0"' || true)
+          if [ -n "$skipped" ]; then echo "skipped tests found: $skipped"; grep -l 'skipped="[1-9]' */build/test-results/test/*.xml; exit 1; fi
+      - name: Backlog rules
+        run: python3 -m unittest discover -s scripts/backlog -p 'test_*.py' && python3 scripts/backlog/backlog.py lint
+      - name: Test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: '*/build/reports/tests/'

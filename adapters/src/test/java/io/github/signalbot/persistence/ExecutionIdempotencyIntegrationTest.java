@@ -28,8 +28,8 @@ import java.util.concurrent.Future;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/** Runs in CI only (needs Docker): a confirmed execution books exactly one paper trade. */
-@Testcontainers
+/** Runs in CI (needs Docker; skipped without it, and CI fails on a skip): a confirmed execution books exactly one paper trade. */
+@Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest
 @Import(PaperWalletIntegrationTest.FakeFeedConfig.class)
 class ExecutionIdempotencyIntegrationTest {
