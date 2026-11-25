@@ -74,7 +74,8 @@ after green CI and the independent review.
    reason is unclear, leave it and say so in the PR.
 5. Findings, classified (see `docs/backlog/TECH-DEBT.md`): a regression inside your own change → fix it here; the
    task itself is wrong or contradicts `DECISIONS.md` or the code → park it with the reason; anything outside the
-   task's scope → add a file `docs/backlog/tech-debt/<date>-<id>-<n>.md` in this PR and do **not** fix it.
+   task's scope → add a file `docs/backlog/tech-debt/<date>-<id>-<n>.md` in this PR (n = the next number not yet
+   used on main or the branch) and do **not** fix it.
    Never write a test that checks the wording of documentation (Markdown prose, README text): it turns CI red for
    every harmless edit. Tests check behaviour, data and code.
 5a. A question the files do not answer: follow "do not wait for Aika" in `docs/backlog/README.md` — cheap to undo →
@@ -117,7 +118,7 @@ after green CI and the independent review.
 
 ## 2. FIX or CI-RED: one fix round on an open PR
 
-Stop rule first: if CI or a check fails **a second time with the same error**, or the failure has nothing to do with
+The 50-minute budget of 1.0 holds here and in section 3 too. Stop rule first: if CI or a check fails **a second time with the same error**, or the failure has nothing to do with
 the task's change (infrastructure, network, the runner, a service outside the repo), do not "fix" anything — park
 (section 4) and quote the error text.
 

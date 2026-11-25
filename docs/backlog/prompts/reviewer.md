@@ -40,7 +40,9 @@ origin/main` lists those files, Flyway migrations included; empty = a test-only 
 back to main with `git restore --source origin/main --worktree -- <files>` (it also removes files the PR added;
 `git checkout origin/main -- <files>` would fail on them), run the new tests, then restore the branch
 (`git restore --source <head sha> --worktree -- .`). The new tests must **fail** without the change and **pass**
-with it. A new test green both ways pins nothing: answer "no" to question 3. Without Docker the Testcontainers tests
+with it. A new test green both ways pins nothing: answer "no" to question 3. A compile error without the change
+(the PR adds the class or method the tests call) proves nothing: then keep the branch's code and break the new
+behaviour by one line instead (flip a comparison, drop a term), check that a new test fails, and undo the edit. Without Docker the Testcontainers tests
 skip: for them, read the test instead and say so in the evidence. Do not trust the PR
 description's claims; the diff and your own run are the evidence. (CI already ran `./gradlew build` with Docker; you need not repeat it. Never open `.env`.)
 
@@ -94,6 +96,10 @@ gh api -X POST repos/Aika8/signal-bot/issues/<n>/comments -F body=@/tmp/review.m
 - pass → `gh api -X POST repos/Aika8/signal-bot/issues/<n>/labels -f "labels[]=review:pass"`
 - fail → label `needs-fix` instead. If `fixes` is 2 or more (two fix rounds already used), label `parked`
   instead and write in the comment what Aika must decide.
+
+On a **pass** there is no fix round to turn "Out of scope" into files, so open one issue per finding:
+`gh api -X POST repos/Aika8/signal-bot/issues -f title="[tech-debt] <one line>" -F body=@/tmp/debt.md
+-f "labels[]=tech-debt"` (body in the format of `docs/backlog/TECH-DEBT.md`).
 
 Classify findings like the executor (`docs/backlog/TECH-DEBT.md`): a regression inside the change → a "no" answer;
 the task itself wrong → fail and say "park: <reason>"; outside the task → "Out of scope", not a failure. A new test

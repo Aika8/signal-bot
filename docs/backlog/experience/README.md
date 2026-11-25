@@ -1,6 +1,7 @@
 # Experience log (write-only for agents)
 
-At the end of every executor run that opens or updates a PR, the run adds **one new file**
+At the end of every executor run that opens or updates a PR (a run that only parks writes its note into the
+parking comment instead), the run adds **one new file**
 `docs/backlog/experience/<YYYY-MM-DD>-<task id>-<HHMM>.md` with 2–3 lines: where it stumbled and how it got past it.
 The reviewer puts its 2–3 lines in its review comment under "Experience".
 

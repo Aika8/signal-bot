@@ -94,7 +94,7 @@ Aika is away and answers nothing. When a run meets a question the task and the f
 Every run also: works at most 50 minutes (then WIP commit and park); parks instead of retrying when the same error
 comes back or a failure is unrelated to the task (infrastructure, network); refuses an incomplete or contradictory
 task by parking it ("missing: …" / "contradicts: …"); records problems outside its task in `docs/backlog/tech-debt/`
-instead of fixing them; adds a write-only note to `docs/backlog/experience/`.
+instead of fixing them; adds a write-only note to `docs/backlog/experience/` when it opens or updates a PR.
 
 Never: ask in the chat and wait (nobody answers), weaken or delete a test to get green, touch a protected path,
 read `.env`, call a live API, spend money, sign up anywhere, give investment advice.
