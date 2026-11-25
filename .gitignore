@@ -28,3 +28,7 @@ Thumbs.db
 
 # Build output in submodules
 **/build/
+
+# Secrets and private parts — never commit
+.env.*
+!.env.example
