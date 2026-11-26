@@ -27,17 +27,20 @@ public class PriceStreamRunner implements ApplicationRunner {
     private final SignalDispatcher dispatcher;
     private final ExitGuard exitGuard;
     private final ExitGuardHandler exitHandler;
+    private final TrailingStateWriter trailingWriter;
     private AutoCloseable subscription;
 
     public PriceStreamRunner(ObjectProvider<MarketDataFeed> marketDataFeed, WatchlistProperties watchlist,
                              TriggerEvaluator evaluator, SignalDispatcher dispatcher,
-                             ExitGuard exitGuard, ExitGuardHandler exitHandler) {
+                             ExitGuard exitGuard, ExitGuardHandler exitHandler,
+                             TrailingStateWriter trailingWriter) {
         this.marketDataFeed = marketDataFeed;
         this.watchlist = watchlist;
         this.evaluator = evaluator;
         this.dispatcher = dispatcher;
         this.exitGuard = exitGuard;
         this.exitHandler = exitHandler;
+        this.trailingWriter = trailingWriter;
     }
 
     @Override
@@ -49,6 +52,7 @@ public class PriceStreamRunner implements ApplicationRunner {
         }
         subscription = feed.subscribe(watchlist.symbols(), tick -> {
             exitGuard.onPrice(tick.symbol(), tick.price()).ifPresent(exitHandler::handle);
+            trailingWriter.afterPrice(tick.symbol());
             evaluator.onPriceTick(tick.symbol(), tick.price(), tick.ts()).ifPresent(dispatcher::dispatch);
         });
     }

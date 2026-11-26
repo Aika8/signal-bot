@@ -280,3 +280,16 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   replace each other and reset the trailing state; (5) the activation tick sets best = price and cannot exit on the
   same tick. Not taken: silently accepting an inconsistent restored state (would hide a persistence bug); a
   separate per-symbol trailing map (two maps could drift apart). Undo: `ExitGuard.onTrailingPrice`.
+- **SB-013** — Details of arming and persisting the trailing take-profit that D-004 leaves open. Choices: (1) a BUY
+  fill arms trailing only with an ATR above zero, a stop, and a fill above the stop (R > 0); otherwise the stop
+  only, logged (an ATR ≤ 0 is "no ATR", as SB-005); (2) `PositionGuardStore.saveTrailing` writes the levels and
+  `risk_kzt` and resets `best_price`/`activated` after the unchanged `upsert`, in the same transaction, and with no
+  trailing it clears the columns so a re-bought symbol never inherits the old levels; (3) the D-004 factors (2R,
+  1 × ATR, 0.1 × ATR) are private constants of `ExecutionService.trailingFor`, unrounded; (4) `GuardLoader` reads
+  the new `findAllGuards` (the old `findAll` is left in place) and, for a stored state `TrailingState` rejects
+  (activated without a best price, or the reverse), logs an ERROR and arms the stop only instead of failing
+  startup, so the other positions stay guarded; (5) `TrailingStateWriter` keeps the last saved state in memory,
+  writes only an activated state that differs from it, and on a failed write logs a WARN and retries on the next
+  tick; a restored activated state is remembered so the first tick after a restart does not rewrite it. Not taken:
+  writing on every tick (the task forbids it); failing startup on an inconsistent row (all guards would be
+  unarmed). Undo: `ExecutionService.trailingFor`, `GuardLoader.load`, `TrailingStateWriter.afterPrice`.

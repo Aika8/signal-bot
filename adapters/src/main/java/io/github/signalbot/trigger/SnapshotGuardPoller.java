@@ -20,11 +20,14 @@ public class SnapshotGuardPoller {
     private final ExitGuard exitGuard;
     private final ContextAssembler assembler;
     private final ExitGuardHandler exitHandler;
+    private final TrailingStateWriter trailingWriter;
 
-    public SnapshotGuardPoller(ExitGuard exitGuard, ContextAssembler assembler, ExitGuardHandler exitHandler) {
+    public SnapshotGuardPoller(ExitGuard exitGuard, ContextAssembler assembler, ExitGuardHandler exitHandler,
+                               TrailingStateWriter trailingWriter) {
         this.exitGuard = exitGuard;
         this.assembler = assembler;
         this.exitHandler = exitHandler;
+        this.trailingWriter = trailingWriter;
     }
 
     @Scheduled(fixedDelayString = "${signalbot.trigger.guard-snapshot-ms:30000}")
@@ -34,6 +37,7 @@ public class SnapshotGuardPoller {
                 PriceSnapshot snapshot = assembler.snapshot(symbol);
                 if (snapshot != null && snapshot.last() != null) {
                     exitGuard.onPrice(symbol, snapshot.last()).ifPresent(exitHandler::handle);
+                    trailingWriter.afterPrice(symbol);
                 }
             } catch (Exception e) {
                 LOG.warn("Snapshot guard check failed for {}: {}", symbol, e.getMessage());
