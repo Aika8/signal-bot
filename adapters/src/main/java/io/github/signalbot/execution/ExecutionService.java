@@ -57,10 +57,19 @@ public class ExecutionService {
         this.tx = tx;
     }
 
+    /** Submit without sizing facts (exits, SELLs). */
     public long submit(Verdict verdict, ExecutionSource source, BigDecimal refPrice) {
+        return submit(verdict, source, refPrice, null);
+    }
+
+    /** Submit a verdict; {@code sizing} is stored with the PENDING row, or {@code null} when there is none. */
+    public long submit(Verdict verdict, ExecutionSource source, BigDecimal refPrice, SizingInfo sizing) {
         Instant now = Instant.now();
-        long id = store.insertPending(verdict.symbol(), verdict.action(), source, verdict.quantity(),
-                verdict.stop(), verdict.takeProfit(), refPrice, now);
+        long id = sizing == null
+                ? store.insertPending(verdict.symbol(), verdict.action(), source, verdict.quantity(),
+                        verdict.stop(), verdict.takeProfit(), refPrice, now)
+                : store.insertPending(verdict.symbol(), verdict.action(), source, verdict.quantity(),
+                        verdict.stop(), verdict.takeProfit(), refPrice, now, sizing);
         ExecutionGateway gw = gateway.getIfAvailable();
         if (gw != null) {
             gw.promptExecution(id, verdict.symbol(), verdict.action(), verdict.quantity(), refPrice);
