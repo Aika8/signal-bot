@@ -51,10 +51,11 @@ scheduled task is one line — the file holds the rest, so changing a prompt is 
 | Intake | `.github/workflows/intake.yml` (code) | every 3 hours at :50 | commit to `main`: QUEUE.md, intake-log.md |
 | Automerge | `.github/workflows/automerge.yml` (code) | after every CI run and hourly at :41 | merges |
 
-No analyst, user or summary run is set up for signal-bot: the queue (140 tasks on 2026-11-26: the 17-step ATR plan,
+No analyst, user or summary run is set up for signal-bot: the queue (143 tasks on 2026-11-26: the 17-step ATR plan, the earnings blackout (D-006),
 pinning tests, fixtures, EDGAR parsing, the lab, the journal, mutation testing and tech-debt audits) is meant to last
 past the week — better left unfinished than run dry. Intake has nothing to move until a proposals file appears.
-Questions that need Aika and are deliberately not queued: `QUESTIONS-BEFORE-LEAVE.md`.
+Nothing in the queue waits for Aika (no `waiting` task); her open questions were decided (DECISIONS.md, "Questions of
+2026-11-26"), and what only she can do is listed in `QUESTIONS-BEFORE-LEAVE.md`, "After the vacation".
 
 A run that has nothing to do stops in its first minute (`backlog.py plan` / `review-queue` say so).
 
