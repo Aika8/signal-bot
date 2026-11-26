@@ -20,7 +20,9 @@ macro calendar.
 
 **Decision.** A BUY is **REJECTED** ("earnings on <date>, within N trading days") when the symbol reports earnings
 within **N = 2 trading days** (starting value, D-005), counted by the same trading-day rule the earnings trigger uses
-(moved to `application`, one rule in one place). A configured calendar that fails → REJECTED (D-001, as with no
+(moved to `application`, one rule in one place). Earnings **today** block too. N = 0 switches the blackout off (an
+explicit guard, independent of the trading-day rule). "Today" is the date in `America/New_York` (earnings dates are
+US exchange dates), read from an injected `Clock`. A configured calendar that fails → REJECTED (D-001, as with no
 ATR); no calendar bean → no blackout, logged. SELLs and protective exits are never blocked.
 
 **Not taken.** Reducing the size instead of rejecting (needs a second sizing rule); macro events (no data source —
@@ -163,7 +165,7 @@ unique `paper_trade.execution_id`.
 ## D-005 — Parameters are not tuned by hand (pending)
 
 Every **starting value** above (k = 2, risk 1%, activation 2R, offset 1 ATR,
-spread 0.1 ATR) is an assumption. Changing them is a backtest decision:
+spread 0.1 ATR, earnings blackout 2 trading days — D-006) is an assumption. Changing them is a backtest decision:
 walk-forward, delisted tickers included, no look-ahead, and the number of
 variants tried recorded. Until then they stay fixed.
 

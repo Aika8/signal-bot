@@ -19,7 +19,8 @@ Rules for every task (the executor prompt repeats them): existing tests are neve
 task's `rewrites` names the file; new tests are new files; an applied Flyway migration is never edited (a change
 is a new `V<n>__….sql`); no real orders and no port that could place one; no live call to Alpaca, Finnhub,
 Telegram or Claude (tests use fixtures and fakes); the **starting values** of `DECISIONS.md` (k = 2, risk 1 %,
-cap 2 %, band 1.5–3 ATR, activation 2R, offset 1 ATR, spread 0.1 ATR) are used as written and never tuned (D-005);
+cap 2 %, band 1.5–3 ATR, activation 2R, offset 1 ATR, spread 0.1 ATR, earnings blackout 2 trading days) are used as
+written and never tuned (D-005);
 `./gradlew build` stays green.
 
 Constructors: when a task adds a parameter to the constructor of an existing class, the old constructor stays as a
@@ -371,11 +372,13 @@ them as input. No live Claude call in tests.
 - size: S
 - paths: `README.md`
 - verify: `grep -nE 'ATR|EXIT_TRAIL|V7|in R|screen' README.md`
-- expect: the README describes the `screen` CLI, the exit guard with the ATR stop and the trailing take-profit, migrations V1–V7, risk per trade in R and position size from the stop, and links DECISIONS.md D-001…D-006 (the earnings blackout only if SB-020 is merged)
+- expect: the README describes the `screen` CLI, the exit guard with the ATR stop and the trailing take-profit, migrations V1–V7, risk per trade in R and position size from the stop, and links DECISIONS.md D-001…D-006 (D-006 is always linked; the README says it is active only when SB-020 is merged)
 
 Step 7 of the ATR plan, docs. Update only what changed; keep "No real orders, ever" and the private-adapter rule
 word for word. The "Risk limits" section: concentration now caps the size; add risk 1 % (cap 2 %) per trade.
 Do not mention values other than those in DECISIONS.md.
+
+## Earnings blackout (D-006, decided without Aika — undo: the property to 0)
 
 ### SB-018 — Trading days: one rule in `application`
 - status: todo
@@ -393,7 +396,7 @@ writing a second one. Holidays are still ignored (Javadoc says so).
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/risk/EarningsBlackout.java`, `application/src/test/java/io/github/signalbot/application/risk/EarningsBlackoutTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.risk.EarningsBlackoutTest'`
-- expect: green; with N = 2, earnings tomorrow or the next trading day block (the reason names the date), in 3 trading days does not, Friday → Monday counts one trading day, N = 0 never blocks, no events never block
+- expect: green; with N = 2, earnings today, tomorrow or the next trading day block (the reason names the date), in 3 trading days does not, Friday → Monday counts one trading day, N = 0 never blocks (also not for earnings today — an explicit `N <= 0` guard), no events never block
 
 D-006, read it whole. `static Optional<String> blocks(LocalDate today, List<EarningsEvent> events, int tradingDays)`
 using `TradingDays` (SB-018). N is a parameter: its starting value lives in configuration (SB-020), not here.
@@ -408,10 +411,16 @@ using `TradingDays` (SB-018). N is a parameter: its starting value lives in conf
 
 D-006. Property `signalbot.risk.earnings-blackout-trading-days` (default `2` in `application.yml`, comment "starting
 value, D-006/D-005"; `0` = off) in a new `@ConfigurationProperties` record under `config/`. In `handle`, for a BUY,
-before the ATR step of SB-009: `EarningsCalendar.upcoming(symbol, today, today + 14 days)` through an
-`ObjectProvider<EarningsCalendar>`, then `EarningsBlackout.blocks`. Rejections are notified like other rejections.
-Constructor rule of the queue header: the existing constructors stay (delegating, blackout off), the new one is
-`@Autowired`.
+before the ATR step of SB-009: `today = LocalDate.now(clock.withZone(America/New_York))`,
+`EarningsCalendar.upcoming(symbol, today, today + 14 days)` through an `ObjectProvider<EarningsCalendar>`, then
+`EarningsBlackout.blocks`. Rejections are notified like other rejections.
+
+- `Clock`: a new constructor parameter; add a `@Bean Clock` (`Clock.systemUTC()`) under `config/` if none exists. The
+  test uses `Clock.fixed` on a Wednesday so "1 / 5 trading days" never depends on the real date.
+- After SB-009 a BUY needs bars, the sizer and cash to be submitted: the new test fakes `PriceHistory` (≥ 15 bars),
+  cash and the portfolio like `LiveDecisionHandlerAtrTest` (SB-009, read it), and checks the 4-argument `submit`.
+- Constructors: SB-009's `@Autowired` constructor becomes a delegating one (blackout off, system clock), the new one
+  with the blackout properties, calendar provider and `Clock` is `@Autowired`; every older constructor keeps working.
 
 ## Tests: pin what exists (new test files only, no production code)
 
@@ -795,7 +804,7 @@ Read `ClaudeDecisionEngine` and `ClaudeDecisionEngineTest` (its fake `ClaudeClie
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.trigger.SignalDispatcherTest'`
 - expect: green; a NEWS trigger right after a PRICE_MOVE on the same symbol is debounced (the key is the symbol only — pinned, and noted in the report), another symbol is not; in dry run the live handler is never called
 
-Read `AD/trigger/SignalDispatcher.java`; a real `Debouncer`, Mockito for `LiveDecisionHandler`, `TriggerProperties` built directly. Whether the debounce key should include the trigger type is Aika's question, not this task's.
+Read `AD/trigger/SignalDispatcher.java`; a real `Debouncer`, Mockito for `LiveDecisionHandler`, `TriggerProperties` built directly. The key stays the symbol only (DECISIONS.md, "Questions of 2026-11-26").
 
 ### SB-230 — Fees: properties over many inputs
 - status: todo

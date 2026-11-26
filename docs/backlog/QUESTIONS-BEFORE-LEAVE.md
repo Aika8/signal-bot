@@ -6,7 +6,7 @@ Written 2026-11-26. Aika's instruction the same day: nothing waits for her. So:
 
 | Question | Decision | Undo |
 |---|---|---|
-| Event filter before FOMC/CPI/NBK/earnings | D-006: no new BUY within 2 trading days before the company's earnings (starting value); tasks SB-018…SB-020 | property `signalbot.risk.earnings-blackout-trading-days: 0` |
+| Event filter before FOMC/CPI/NBK/earnings | D-006: no new BUY from 2 trading days before the company's earnings through the day itself (starting value; US exchange date); tasks SB-018…SB-020 | property `signalbot.risk.earnings-blackout-trading-days: 0` |
 | Insider buys line in the Claude prompt | not added; stays in the lab until H-001 is measured | one `append` in `ClaudePromptBuilder` |
 | Lab label rule (SB-515) | kept: < 30 trades → candidate, Bonferroni bar on \|t\|, holdout must agree | constants in `LabelRule` |
 | Debounce key | stays the symbol only | the key in `SignalDispatcher.dispatch` |
