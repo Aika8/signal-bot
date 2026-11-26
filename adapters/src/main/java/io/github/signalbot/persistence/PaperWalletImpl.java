@@ -1,5 +1,6 @@
 package io.github.signalbot.persistence;
 
+import io.github.signalbot.application.review.RMultiple;
 import io.github.signalbot.config.FxConverter;
 import io.github.signalbot.config.PaperWalletProperties;
 import io.github.signalbot.domain.model.Action;
@@ -13,6 +14,7 @@ import io.github.signalbot.domain.port.MarketDataFeed;
 import io.github.signalbot.domain.port.PaperWallet;
 import io.github.signalbot.persistence.LedgerStore.TradeRecord;
 import io.github.signalbot.persistence.PositionStore.PaperPositionRow;
+import io.github.signalbot.persistence.TradeQueryStore.OpeningBuy;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +24,7 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -41,9 +44,11 @@ public class PaperWalletImpl implements PaperWallet {
     private final FxConverter fx;
     private final FeeModel feeModel;
     private final PaperWalletProperties props;
+    private final TradeQueryStore trades;
 
     public PaperWalletImpl(ObjectProvider<MarketDataFeed> feedProvider, PositionStore positions, CashStore cash,
-                           LedgerStore ledger, FxConverter fx, FeeModel feeModel, PaperWalletProperties props) {
+                           LedgerStore ledger, FxConverter fx, FeeModel feeModel, PaperWalletProperties props,
+                           TradeQueryStore trades) {
         this.feedProvider = feedProvider;
         this.positions = positions;
         this.cash = cash;
@@ -51,6 +56,7 @@ public class PaperWalletImpl implements PaperWallet {
         this.fx = fx;
         this.feeModel = feeModel;
         this.props = props;
+        this.trades = trades;
     }
 
     @Override
@@ -108,6 +114,9 @@ public class PaperWalletImpl implements PaperWallet {
         BigDecimal taxKzt = realizedKzt.signum() > 0 ? kzt(realizedKzt.multiply(props.taxRate())) : BigDecimal.ZERO;
 
         cash.adjust(Ccy.KZT, notionalKzt.subtract(fee.totalKzt()));
+        Optional<BigDecimal> resultR = executionId == null
+                ? Optional.empty()
+                : resultR(pos, qty, realizedKzt, fee.totalKzt());
         BigDecimal remaining = pos.quantity().subtract(qty);
         if (remaining.signum() <= 0) {
             positions.delete(pos.secCode());
@@ -119,11 +128,42 @@ public class PaperWalletImpl implements PaperWallet {
         Instant now = Instant.now();
         long id = ledger.insertTrade(new TradeRecord(v.symbol(), Action.SELL, qty, fillPrice,
                 fee.totalKzt(), notionalKzt, realizedKzt, taxKzt, ccy, v.symbol(), now, executionId));
+        resultR.ifPresent(r -> trades.setResultR(executionId, r));
         if (taxKzt.signum() > 0) {
             ledger.accrueTax(id, realizedKzt, taxKzt);
         }
         ledger.addRealizedPnl(LocalDate.ofInstant(now, ALMATY), realizedKzt);
         return new PaperFill(v.symbol(), Action.SELL, qty, fillPrice, fee, realizedKzt, taxKzt, now);
+    }
+
+    /**
+     * The SELL's result in R ({@link RMultiple}): 1R is the sum of {@code executions.risk_kzt} of the BUYs that
+     * opened the position (not {@code position_guards}: the guard is deleted when an exit fires and overwritten by
+     * a second BUY). Empty when any of those BUYs has no execution, no 1R or no recorded fee — the trade is then
+     * left out of R statistics rather than given a partial 1R.
+     */
+    private Optional<BigDecimal> resultR(PaperPositionRow pos, BigDecimal soldQty, BigDecimal realizedKzt,
+                                         BigDecimal sellFeeKzt) {
+        List<OpeningBuy> buys = trades.openingBuys(pos.secCode(), pos.openedAt());
+        if (buys.isEmpty()) {
+            return Optional.empty();
+        }
+        BigDecimal riskKzt = BigDecimal.ZERO;
+        BigDecimal buyFeesKzt = BigDecimal.ZERO;
+        BigDecimal boughtQty = BigDecimal.ZERO;
+        for (OpeningBuy buy : buys) {
+            if (buy.riskKzt() == null || buy.feeTotalKzt() == null) {
+                return Optional.empty();
+            }
+            riskKzt = riskKzt.add(buy.riskKzt());
+            buyFeesKzt = buyFeesKzt.add(buy.feeTotalKzt());
+            boughtQty = boughtQty.add(buy.quantity());
+        }
+        if (boughtQty.signum() <= 0) {
+            return Optional.empty();
+        }
+        BigDecimal net = RMultiple.netResultKzt(realizedKzt, sellFeeKzt, buyFeesKzt, soldQty, boughtQty);
+        return RMultiple.of(net, riskKzt);
     }
 
     private static BigDecimal weightedAvg(PaperPositionRow p, BigDecimal addQty, BigDecimal addPrice) {

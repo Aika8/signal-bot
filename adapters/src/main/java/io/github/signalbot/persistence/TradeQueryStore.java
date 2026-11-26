@@ -3,12 +3,20 @@ package io.github.signalbot.persistence;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
 /** Read-side queries over the paper trade log. */
 @Repository
 public class TradeQueryStore {
+
+    /**
+     * A BUY trade of the position that is open now, with its execution's 1R and total fee (null when the trade
+     * was booked outside the execution flow, or the execution has no such value).
+     */
+    public record OpeningBuy(BigDecimal quantity, BigDecimal riskKzt, BigDecimal feeTotalKzt) {
+    }
 
     private final JdbcClient db;
 
@@ -44,5 +52,30 @@ public class TradeQueryStore {
                         rs.getBigDecimal("fill_price").stripTrailingZeros().toPlainString(),
                         rs.getBigDecimal("realized_gain").stripTrailingZeros().toPlainString()))
                 .list();
+    }
+
+    /**
+     * The BUY trades of {@code symbol} filled at or after {@code openedAt} (the open position's opening time),
+     * with {@code executions.risk_kzt} (SB-008) and {@code executions.fee_total} (V5) of their executions.
+     */
+    public List<OpeningBuy> openingBuys(String symbol, Instant openedAt) {
+        return db.sql("""
+                        SELECT t.quantity, e.risk_kzt, e.fee_total
+                        FROM paper_trade t LEFT JOIN executions e ON e.id = t.execution_id
+                        WHERE t.sec_code = :symbol AND t.action = 'BUY' AND t.filled_at >= :openedAt
+                        ORDER BY t.filled_at
+                        """)
+                .param("symbol", symbol)
+                .param("openedAt", java.sql.Timestamp.from(openedAt))
+                .query((rs, i) -> new OpeningBuy(rs.getBigDecimal("quantity"), rs.getBigDecimal("risk_kzt"),
+                        rs.getBigDecimal("fee_total")))
+                .list();
+    }
+
+    /** Sets {@code paper_trade.result_r} on the trade of {@code executionId}; returns the number of rows updated. */
+    public int setResultR(long executionId, BigDecimal resultR) {
+        return db.sql("UPDATE paper_trade SET result_r = :r WHERE execution_id = :executionId")
+                .param("r", resultR).param("executionId", executionId)
+                .update();
     }
 }
