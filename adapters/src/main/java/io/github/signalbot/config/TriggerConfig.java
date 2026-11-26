@@ -26,9 +26,15 @@ public class TriggerConfig {
         return new Debouncer(Duration.ofMinutes(props.debounceMinutes()));
     }
 
+    /** One set of limits for the evaluator and the live path's sizing (D-003). */
     @Bean
-    public RiskLimitEvaluator riskLimitEvaluator() {
-        return new RiskLimitEvaluator(RiskLimits.defaults());
+    public RiskLimits riskLimits() {
+        return RiskLimits.defaults();
+    }
+
+    @Bean
+    public RiskLimitEvaluator riskLimitEvaluator(RiskLimits riskLimits) {
+        return new RiskLimitEvaluator(riskLimits);
     }
 
     @Bean

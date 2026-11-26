@@ -249,3 +249,15 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   space as thousands separator; an ATR stop without a Claude stop reads `Claude: none`. Not taken: a
   `promptExecution` overload with `SizingInfo` (a default method would break the existing Mockito verifications
   of the five-argument call); rounding stops to two decimals (would change the number the operator places).
+- **SB-009** — Details of the live BUY path that D-002/D-003 leave open. Choices: (1) the live path prices and sizes
+  in USD with US fees (Alpaca is its only feed and the paper wallet defaults to USD/US), as the existing
+  `riskContext` already assumed; (2) round-trip fees = 2 × `FeeModel.compute(US, q, q × entry)` where q is the size
+  the other bounds allow before fees, then the size is computed again with those fees (fees only lower the size, so
+  this never under-counts them); (3) cash qty = floor(Σ over all cash balances of (KZT value − reserved in KZT) /
+  entry in KZT), read from the context's `CashReader` balances, buy fee not deducted; (4) a fractional Claude
+  quantity is floored, a missing one is no bound; (5) `SizingInfo.riskPerShare` is `entry − stop` in the instrument
+  currency (the column sits beside `atr` and `claude_stop`; KZT is in `risk_kzt`); (6) no portfolio value or no
+  entry price → REJECTED with that reason, like "no ATR"; (7) the submitted verdict's `entry` is the price the
+  size was computed at, so the evaluator's concentration check sees the notional the cap was sized for;
+  (8) `RiskLimits` is now a bean (`TriggerConfig.riskLimits`) shared by the evaluator and the sizing. Not taken:
+  fees for Claude's quantity (absent for some verdicts); a second fee or FX rule. Undo: `LiveDecisionHandler.size`.
