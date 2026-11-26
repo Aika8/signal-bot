@@ -26,7 +26,7 @@ find_jdk21() {
   for j in "${JAVA_HOME:-}" /usr/lib/jvm/* /opt/jdk*; do
     [ -x "$j/bin/javac" ] || continue
     # not `head -1`: the cloud image prints "Picked up JAVA_TOOL_OPTIONS: …" before the version line
-    "$j/bin/java" -version 2>&1 | grep -m1 -E 'version "' | grep -qE '"21[."]' && { echo "$j"; return 0; }
+    "$j/bin/java" -version 2>&1 | grep -m1 -E '^(openjdk|java) version "' | grep -qE '"21[."]' && { echo "$j"; return 0; }
   done
   return 1
 }
