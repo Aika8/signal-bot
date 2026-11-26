@@ -261,3 +261,12 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   size was computed at, so the evaluator's concentration check sees the notional the cap was sized for;
   (8) `RiskLimits` is now a bean (`TriggerConfig.riskLimits`) shared by the evaluator and the sizing. Not taken:
   fees for Claude's quantity (absent for some verdicts); a second fee or FX rule. Undo: `LiveDecisionHandler.size`.
+- **SB-011** — Details of the ATR line in the Claude prompt. Choices: (1) `ContextAssembler` uses the live BUY
+  path's `LiveDecisionHandler.ATR_BARS` (30) and `ATR_PERIOD` (14), so prompt and gate see the same ATR; (2) the
+  ATR shows rounded HALF_UP to 2 decimals and the percent of the last price to 1 decimal; without a snapshot (no
+  market-data feed) the line is `ATR(14): <value>` with no percent; (3) "not available" covers no `PriceHistory`
+  bean, a failing history (logged WARN, the context does not fail — ATR is context, not a gate), too few bars, and
+  an ATR of zero or below (as `StopPolicy` treats it, SB-005); (4) the stop band (1.5–3 ATR, else 2 ATR) is one
+  bullet in the system prompt's rules, written as text because `StopPolicy`'s constants are package-private
+  (tech debt SB-011-1). Not taken: failing the context on a broken history (would block HOLD/SELL verdicts on a
+  number that is only context). Undo: `ContextAssembler.atr` and `ClaudePromptBuilder.atr`.
