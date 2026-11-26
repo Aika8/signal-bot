@@ -1,9 +1,11 @@
 package io.github.signalbot.persistence;
 
+import io.github.signalbot.application.risk.StopSource;
 import io.github.signalbot.domain.model.Action;
 import io.github.signalbot.domain.model.FeeBreakdown;
 import io.github.signalbot.execution.ExecutionSource;
 import io.github.signalbot.execution.ExecutionState;
+import io.github.signalbot.execution.SizingInfo;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -18,7 +20,15 @@ public class ExecutionStore {
 
     public record ExecutionRow(
             long id, String symbol, Action action, ExecutionSource source, BigDecimal quantity,
-            BigDecimal stop, BigDecimal takeProfit, BigDecimal refPrice, ExecutionState state, Instant pushedAt) {
+            BigDecimal stop, BigDecimal takeProfit, BigDecimal refPrice, ExecutionState state, Instant pushedAt,
+            SizingInfo sizing) {
+
+        /** A row without sizing facts (exits, SELLs, rows from before V7). */
+        public ExecutionRow(long id, String symbol, Action action, ExecutionSource source, BigDecimal quantity,
+                            BigDecimal stop, BigDecimal takeProfit, BigDecimal refPrice, ExecutionState state,
+                            Instant pushedAt) {
+            this(id, symbol, action, source, quantity, stop, takeProfit, refPrice, state, pushedAt, null);
+        }
     }
 
     public record SlippageRow(Action action, BigDecimal fillPrice, BigDecimal refPrice) {
@@ -35,15 +45,31 @@ public class ExecutionStore {
 
     public long insertPending(String symbol, Action action, ExecutionSource source, BigDecimal quantity,
                               BigDecimal stop, BigDecimal takeProfit, BigDecimal refPrice, Instant pushedAt) {
+        return insertPending(symbol, action, source, quantity, stop, takeProfit, refPrice, pushedAt, null);
+    }
+
+    /** Inserts a PENDING row with its sizing facts (V7 columns); {@code sizing} may be {@code null}. */
+    public long insertPending(String symbol, Action action, ExecutionSource source, BigDecimal quantity,
+                              BigDecimal stop, BigDecimal takeProfit, BigDecimal refPrice, Instant pushedAt,
+                              SizingInfo sizing) {
         return db.sql("""
                         INSERT INTO executions (symbol, action, source, quantity, stop, take_profit,
-                                                ref_price, state, pushed_at)
-                        VALUES (:symbol, :action, :source, :qty, :stop, :tp, :ref, 'PENDING', :pushedAt)
+                                                ref_price, state, pushed_at, stop_source, claude_stop, atr,
+                                                risk_per_share, risk_kzt, claude_quantity)
+                        VALUES (:symbol, :action, :source, :qty, :stop, :tp, :ref, 'PENDING', :pushedAt,
+                                :stopSource, :claudeStop, :atr, :riskPerShare, :riskKzt, :claudeQty)
                         RETURNING id
                         """)
                 .param("symbol", symbol).param("action", action.name()).param("source", source.name())
                 .param("qty", quantity).param("stop", stop).param("tp", takeProfit).param("ref", refPrice)
                 .param("pushedAt", java.sql.Timestamp.from(pushedAt))
+                .param("stopSource", sizing == null || sizing.stopSource() == null
+                        ? null : sizing.stopSource().name(), java.sql.Types.VARCHAR)
+                .param("claudeStop", sizing == null ? null : sizing.claudeStop(), java.sql.Types.NUMERIC)
+                .param("atr", sizing == null ? null : sizing.atr(), java.sql.Types.NUMERIC)
+                .param("riskPerShare", sizing == null ? null : sizing.riskPerShare(), java.sql.Types.NUMERIC)
+                .param("riskKzt", sizing == null ? null : sizing.riskKzt(), java.sql.Types.NUMERIC)
+                .param("claudeQty", sizing == null ? null : sizing.claudeQuantity(), java.sql.Types.NUMERIC)
                 .query(Long.class).single();
     }
 
@@ -143,6 +169,23 @@ public class ExecutionStore {
                 rs.getLong("id"), rs.getString("symbol"), Action.valueOf(rs.getString("action")),
                 ExecutionSource.valueOf(rs.getString("source")), rs.getBigDecimal("quantity"),
                 rs.getBigDecimal("stop"), rs.getBigDecimal("take_profit"), rs.getBigDecimal("ref_price"),
-                ExecutionState.valueOf(rs.getString("state")), rs.getTimestamp("pushed_at").toInstant());
+                ExecutionState.valueOf(rs.getString("state")), rs.getTimestamp("pushed_at").toInstant(),
+                sizing(rs));
+    }
+
+    /** The V7 sizing columns, or {@code null} when none is set (old rows, exits, SELLs). */
+    private static SizingInfo sizing(java.sql.ResultSet rs) throws java.sql.SQLException {
+        String stopSource = rs.getString("stop_source");
+        BigDecimal claudeStop = rs.getBigDecimal("claude_stop");
+        BigDecimal atr = rs.getBigDecimal("atr");
+        BigDecimal riskPerShare = rs.getBigDecimal("risk_per_share");
+        BigDecimal riskKzt = rs.getBigDecimal("risk_kzt");
+        BigDecimal claudeQuantity = rs.getBigDecimal("claude_quantity");
+        if (stopSource == null && claudeStop == null && atr == null && riskPerShare == null && riskKzt == null
+                && claudeQuantity == null) {
+            return null;
+        }
+        return new SizingInfo(stopSource == null ? null : StopSource.valueOf(stopSource), claudeStop, atr,
+                riskPerShare, riskKzt, claudeQuantity);
     }
 }
