@@ -47,7 +47,8 @@ public class TelegramExecutionGateway implements ExecutionGateway {
         }
         Optional<ExecutionRow> row = row(executionId);
         String text = ExecutionPromptFormatter.format(symbol, action, quantity, refPrice,
-                row.map(ExecutionRow::stop).orElse(null), row.map(ExecutionRow::sizing).orElse(null));
+                row.map(ExecutionRow::stop).orElse(null), row.map(ExecutionRow::sizing).orElse(null),
+                row.map(ExecutionRow::limitPrice).orElse(null));
         InlineKeyboardButton executed = InlineKeyboardButton.builder()
                 .text("Executed").callbackData("exec:FILL:" + executionId).build();
         InlineKeyboardButton skipped = InlineKeyboardButton.builder()
