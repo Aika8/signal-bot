@@ -1,11 +1,11 @@
-# Intake for the cloud backlog run (docs/backlog/README.md): once a day, code — not an agent — moves at most five
-# small, checkable proposals of the day from docs/backlog/proposals/ into docs/backlog/QUEUE.md. Everything else
+# Intake for the cloud backlog run (docs/backlog/README.md): every three hours, code — not an agent — moves every
+# small, checkable proposal of the day from docs/backlog/proposals/ into docs/backlog/QUEUE.md (no daily cap). Everything else
 # waits for Aika (docs/backlog/intake-log.md says why). Rules: scripts/backlog/backlog.py, `intake`.
 name: intake
 
 on:
   schedule:
-    - cron: '50 21 * * *'   # 21:50 UTC = 02:50 Almaty, after the analyst and user runs of the day
+    - cron: '50 */3 * * *'  # every 3 hours at :50 UTC; a run with nothing new commits nothing
   workflow_dispatch:
     inputs:
       date:

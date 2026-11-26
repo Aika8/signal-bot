@@ -15,7 +15,7 @@ free minutes. The same scheme runs in `Aika8/learning-exchange`; `scripts/backlo
 | The rules as code | `scripts/backlog/backlog.py` (+ tests, run in CI) | Aika |
 | CI | `.github/workflows/ci.yml` (`./gradlew build` + backlog tests) | Aika |
 | Merge gate | `.github/workflows/automerge.yml` | Aika |
-| Proposals → queue, ≤ 5 a day | `.github/workflows/intake.yml`, format in `PROPOSALS.md` | Aika |
+| Proposals → queue, no daily cap | `.github/workflows/intake.yml`, format in `PROPOSALS.md` | Aika |
 | Off switch | `docs/backlog/PAUSE` (create it to stop everything) | Aika, also from the GitHub phone app |
 | Guard against pushes that skip the gate | `.github/workflows/guard.yml`, active while `docs/backlog/UNATTENDED` exists | Aika |
 | Run prompts | `docs/backlog/prompts/*.md` | Aika |
@@ -46,13 +46,15 @@ scheduled task is one line — the file holds the rest, so changing a prompt is 
 
 | Run | Prompt file | When (UTC; Almaty = UTC+5) | Writes |
 |---|---|---|---|
-| Executor | `prompts/executor.md` | hourly at :12 (frequency set after the trial measurement) | branch `claude/<task id>`, a PR |
-| Reviewer | `prompts/reviewer.md` | hourly at :42 | a review comment and a label on one PR |
-| Intake | `.github/workflows/intake.yml` (code) | daily 21:50 | commit to `main`: QUEUE.md, intake-log.md |
+| Executor | `prompts/executor.md` | hourly at :17 | branch `claude/<task id>`, a PR |
+| Reviewer | `prompts/reviewer.md` | hourly at :47 | a review comment and a label on one PR |
+| Intake | `.github/workflows/intake.yml` (code) | every 3 hours at :50 | commit to `main`: QUEUE.md, intake-log.md |
 | Automerge | `.github/workflows/automerge.yml` (code) | after every CI run and hourly at :41 | merges |
 
-No analyst, user or summary run is set up for signal-bot: the queue (8 test tasks + 17 ATR-plan tasks) is enough
-for the week, and intake has nothing to move until a proposals file appears.
+No analyst, user or summary run is set up for signal-bot: the queue (140 tasks on 2026-11-26: the 17-step ATR plan,
+pinning tests, fixtures, EDGAR parsing, the lab, the journal, mutation testing and tech-debt audits) is meant to last
+past the week — better left unfinished than run dry. Intake has nothing to move until a proposals file appears.
+Questions that need Aika and are deliberately not queued: `QUESTIONS-BEFORE-LEAVE.md`.
 
 A run that has nothing to do stops in its first minute (`backlog.py plan` / `review-queue` say so).
 
