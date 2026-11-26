@@ -1,6 +1,7 @@
 package io.github.signalbot.execution;
 
 import io.github.signalbot.application.trigger.ExitGuard;
+import io.github.signalbot.application.trigger.TrailingLevels;
 import io.github.signalbot.application.trigger.TriggerEvaluator;
 import io.github.signalbot.config.ExecutionProperties;
 import io.github.signalbot.domain.model.Action;
@@ -32,6 +33,11 @@ import java.util.Optional;
 public class ExecutionService {
 
     private static final Logger LOG = LoggerFactory.getLogger(ExecutionService.class);
+
+    /** D-004 starting values: activation = entry + 2R, offset = 1 × ATR(14), protective spread = 0.1 × ATR(14). */
+    private static final BigDecimal ACTIVATION_R = new BigDecimal("2");
+    private static final BigDecimal OFFSET_ATR = BigDecimal.ONE;
+    private static final BigDecimal SPREAD_ATR = new BigDecimal("0.1");
 
     private final ExecutionStore store;
     private final PaperWallet paperWallet;
@@ -139,6 +145,7 @@ public class ExecutionService {
         long latencyMs = Duration.between(row.pushedAt(), now).toMillis();
         Verdict verdict = new Verdict(row.symbol(), row.action(), row.quantity(), fillPrice,
                 row.stop(), row.takeProfit(), 1.0, "manual fill", now.plus(Duration.ofMinutes(15)));
+        TrailingLevels trailing = row.action() == Action.BUY ? trailingFor(row, fillPrice) : null;
         PaperFill fill;
         try {
             fill = tx.execute(status -> {
@@ -149,6 +156,8 @@ public class ExecutionService {
                 store.recordFee(row.id(), f.feeBreakdown());
                 if (row.action() == Action.BUY) {
                     guardStore.upsert(row.symbol(), row.stop(), row.takeProfit());
+                    guardStore.saveTrailing(row.symbol(), trailing,
+                            row.sizing() == null ? null : row.sizing().riskKzt());
                 } else {
                     guardStore.delete(row.symbol());
                 }
@@ -161,12 +170,37 @@ public class ExecutionService {
             return unchanged(row.id(), store.find(row.id()));
         }
         triggerEvaluator.setReferencePrice(row.symbol(), fillPrice, now);
-        if (row.action() == Action.BUY) {
-            exitGuard.arm(row.symbol(), row.stop(), row.takeProfit());
+        if (row.action() == Action.BUY && trailing != null) {
+            exitGuard.armTrailing(row.symbol(), row.stop(), trailing);
+        } else if (row.action() == Action.BUY) {
+            // No fixed take-profit is armed any more (D-004); Claude's takeProfit stays on the execution for review.
+            exitGuard.arm(row.symbol(), row.stop(), null);
         } else {
             exitGuard.disarm(row.symbol());
         }
         return new ExecutionResult(row.id(), Outcome.FILLED, ExecutionState.FILLED, fillPrice, null);
+    }
+
+    /**
+     * The trailing take-profit of a BUY filled at {@code fillPrice} (D-004): R = fill − stop, activation = fill + 2R,
+     * offset = 1 × ATR, spread = 0.1 × ATR, with the ATR of the execution's sizing facts. {@code null} (stop only)
+     * when there is no ATR above zero, no stop, or the fill is not above the stop (no positive R).
+     */
+    private static TrailingLevels trailingFor(ExecutionRow row, BigDecimal fillPrice) {
+        BigDecimal atr = row.sizing() == null ? null : row.sizing().atr();
+        if (atr == null || atr.signum() <= 0 || row.stop() == null) {
+            LOG.info("BUY {} (execution {}) filled without an ATR or stop; arming the stop only", row.symbol(),
+                    row.id());
+            return null;
+        }
+        BigDecimal r = fillPrice.subtract(row.stop());
+        if (r.signum() <= 0) {
+            LOG.warn("BUY {} (execution {}) filled at {}, not above its stop {}; arming the stop only",
+                    row.symbol(), row.id(), fillPrice, row.stop());
+            return null;
+        }
+        return new TrailingLevels(fillPrice.add(ACTIVATION_R.multiply(r)), OFFSET_ATR.multiply(atr),
+                SPREAD_ATR.multiply(atr));
     }
 
     private ExecutionResult failed(ExecutionRow row, RuntimeException e) {
