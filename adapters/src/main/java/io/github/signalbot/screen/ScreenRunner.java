@@ -2,7 +2,9 @@ package io.github.signalbot.screen;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.github.signalbot.config.FinnhubProperties;
+import io.github.signalbot.domain.model.DailyBar;
 import io.github.signalbot.domain.model.EarningsEvent;
+import io.github.signalbot.market.AlpacaBarsMapper;
 import io.github.signalbot.market.AlpacaSnapshotMapper;
 import io.github.signalbot.news.FinnhubEarningsMapper;
 import org.springframework.boot.CommandLineRunner;
@@ -28,6 +30,7 @@ public class ScreenRunner implements CommandLineRunner {
     private final FinnhubProperties finnhubProps;
     private final ScreenProperties screen;
     private final AlpacaSnapshotMapper snapshotMapper = new AlpacaSnapshotMapper();
+    private final AlpacaBarsMapper barsMapper = new AlpacaBarsMapper();
     private final FinnhubEarningsMapper earningsMapper = new FinnhubEarningsMapper();
 
     public ScreenRunner(RestClient alpacaDataRestClient, RestClient finnhubRestClient,
@@ -44,8 +47,8 @@ public class ScreenRunner implements CommandLineRunner {
         for (String symbol : screen.candidates()) {
             try {
                 BigDecimal last = lastPrice(symbol);
-                List<Bar> bars = dailyBars(symbol);
-                BigDecimal adv = ScreenMetrics.advMillions(bars);
+                List<DailyBar> bars = dailyBars(symbol);
+                BigDecimal adv = ScreenMetrics.advMillions(bars.stream().map(ScreenRunner::toBar).toList());
                 BigDecimal atr = ScreenMetrics.atrPercent(bars, last);
                 boolean pass = ScreenMetrics.pass(last, adv, atr, screen.maxPrice());
                 rows.add(new Row(symbol, last, adv, atr, nextEarnings(symbol), pass));
@@ -72,16 +75,16 @@ public class ScreenRunner implements CommandLineRunner {
         return snapshotMapper.toSnapshot(symbol, node).last();
     }
 
-    private List<Bar> dailyBars(String symbol) {
+    /** All daily bars Alpaca returns, oldest first; a missing or malformed field throws (D-001), never 0. */
+    private List<DailyBar> dailyBars(String symbol) {
         JsonNode node = alpaca.get()
                 .uri(b -> b.path("/v2/stocks/{s}/bars").queryParam("timeframe", "1Day").queryParam("limit", 60).build(symbol))
                 .retrieve().body(JsonNode.class);
-        List<Bar> bars = new ArrayList<>();
-        for (JsonNode e : node.path("bars")) {
-            bars.add(new Bar(new BigDecimal(e.path("h").asText("0")), new BigDecimal(e.path("l").asText("0")),
-                    new BigDecimal(e.path("c").asText("0")), e.path("v").asLong(0)));
-        }
-        return bars;
+        return barsMapper.toBars(symbol, node);
+    }
+
+    private static Bar toBar(DailyBar bar) {
+        return new Bar(bar.high(), bar.low(), bar.close(), bar.volume());
     }
 
     private String nextEarnings(String symbol) {

@@ -1,12 +1,16 @@
 package io.github.signalbot.screen;
 
+import io.github.signalbot.application.risk.Atr;
+import io.github.signalbot.domain.model.DailyBar;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 
-/** Pure screen metrics: ATR% (simple mean of true range), ADV in millions, PASS rule. */
+/** Pure screen metrics: ATR% (Wilder's ATR(14), D-002), ADV in millions, PASS rule. */
 public final class ScreenMetrics {
 
+    private static final int ATR_PERIOD = 14;
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
     private static final BigDecimal MILLION = BigDecimal.valueOf(1_000_000);
     private static final BigDecimal ADV_MIN = BigDecimal.valueOf(5);
@@ -16,21 +20,19 @@ public final class ScreenMetrics {
     private ScreenMetrics() {
     }
 
-    /** ATR as a percent of {@code last}: simple mean of daily true range over the bars. */
-    public static BigDecimal atrPercent(List<Bar> bars, BigDecimal last) {
-        if (bars == null || bars.size() < 2 || last == null || last.signum() == 0) {
-            return BigDecimal.ZERO;
+    /**
+     * ATR as a percent of {@code last}: Wilder's ATR(14) from {@link Atr#wilder} (D-002) / last × 100, scale 2.
+     *
+     * @param bars completed daily bars, oldest first
+     * @throws IllegalStateException    with "no ATR (n bars)" when there are fewer than 15 bars
+     * @throws IllegalArgumentException when {@code last} is missing or zero
+     */
+    public static BigDecimal atrPercent(List<DailyBar> bars, BigDecimal last) {
+        if (last == null || last.signum() == 0) {
+            throw new IllegalArgumentException("no last price for ATR%: " + last);
         }
-        BigDecimal sumTr = BigDecimal.ZERO;
-        for (int i = 1; i < bars.size(); i++) {
-            BigDecimal prevClose = bars.get(i - 1).close();
-            Bar b = bars.get(i);
-            BigDecimal tr = b.high().subtract(b.low())
-                    .max(b.high().subtract(prevClose).abs())
-                    .max(b.low().subtract(prevClose).abs());
-            sumTr = sumTr.add(tr);
-        }
-        BigDecimal atr = sumTr.divide(BigDecimal.valueOf(bars.size() - 1), 6, RoundingMode.HALF_UP);
+        BigDecimal atr = Atr.wilder(bars, ATR_PERIOD)
+                .orElseThrow(() -> new IllegalStateException("no ATR (" + bars.size() + " bars)"));
         return atr.divide(last, 6, RoundingMode.HALF_UP).multiply(HUNDRED).setScale(2, RoundingMode.HALF_UP);
     }
 
