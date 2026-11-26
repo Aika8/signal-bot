@@ -1,6 +1,7 @@
 package io.github.signalbot.review;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.signalbot.application.review.Expectancy;
 import io.github.signalbot.config.TelegramProperties;
 import io.github.signalbot.domain.port.PortfolioReader;
 import io.github.signalbot.execution.ExecutionState;
@@ -26,7 +27,11 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 
-/** Nightly job at 23:30 Almaty: summarize the day (incl. latency, slippage, exec counts), review, store, push. */
+/**
+ * Nightly job at 23:30 Almaty: summarize the day (incl. latency, slippage, exec counts) and the trades in R so far,
+ * review, store, push. The "Trades in R" section is computed by code ({@link Expectancy}); Claude receives it inside
+ * the summary, and it is appended unchanged after Claude's written review, so the numbers never depend on Claude.
+ */
 @Component
 public class NightlyReviewJob {
 
@@ -66,12 +71,13 @@ public class NightlyReviewJob {
         Instant dayStart = today.atStartOfDay(ALMATY).toInstant();
         Instant dayEnd = today.plusDays(1).atStartOfDay(ALMATY).toInstant();
 
-        String summary = buildSummary(today, dayStart, dayEnd);
+        String tradesInR = tradesInR();
+        String summary = buildSummary(today, dayStart, dayEnd) + tradesInR;
         String review = summary;
         ClaudeReviewer r = reviewer.getIfAvailable();
         if (r != null) {
             try {
-                review = r.review(summary);
+                review = r.review(summary) + "\n\n" + tradesInR;
             } catch (Exception e) {
                 LOG.warn("Nightly review call failed: {}; storing raw summary", e.getMessage());
             }
@@ -102,6 +108,10 @@ public class NightlyReviewJob {
         sb.append("Trades (").append(trades.size()).append("):\n");
         trades.forEach(t -> sb.append("  - ").append(t).append('\n'));
         return sb.toString();
+    }
+
+    private String tradesInR() {
+        return ExpectancySection.format(Expectancy.of(tradeQuery.closedResultsR()), tradeQuery.closedWithoutRCount());
     }
 
     private static BigDecimal avgSlippage(List<SlippageRow> rows) {
