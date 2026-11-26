@@ -241,3 +241,11 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   `riskPerTradePct` ≤ 0; (6) a rejection names the bound that made the size < 1 (e.g. "available cash buys less
   than one share"). Not taken: storing the budget as `riskKzt` (realised R would then be measured against risk not
   taken); a rejection instead of an exception for `entry ≤ stop` (would hide a bug upstream).
+- **SB-010** — How does the Telegram prompt get the sizing facts, and how are they shown? Choice: the gateway reads
+  the execution row by id (`ExecutionStore.find`), so `ExecutionGateway` and its callers stay unchanged; if the row
+  cannot be read the prompt still goes out without the sizing lines (logged), because a missing prompt would block
+  the operator more than a shorter one. Sizing lines only for a BUY with sizing facts. Prices show at least two
+  decimals and never lose digits (an unrounded ATR stop shows in full); 1R is rounded HALF_UP to whole tenge with a
+  space as thousands separator; an ATR stop without a Claude stop reads `Claude: none`. Not taken: a
+  `promptExecution` overload with `SizingInfo` (a default method would break the existing Mockito verifications
+  of the five-argument call); rounding stops to two decimals (would change the number the operator places).
