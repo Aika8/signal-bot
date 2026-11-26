@@ -8,6 +8,26 @@ findings.
 
 ---
 
+## D-006 — No new BUY just before the company's earnings (2026-11-26, decided without Aika)
+
+**Decided without Aika** (her instruction of 2026-11-26: "nothing should wait for me"; the queue author chose the
+option easiest to undo). **Undo:** set `signalbot.risk.earnings-blackout-trading-days: 0` (off), or revert the
+tasks SB-018…SB-020.
+
+**Context.** The November requirements ask for no entry, or a smaller size, before FOMC/NBK decisions, CPI and the
+company's earnings. Only the company's earnings have a source in the code (`EarningsCalendar`, Finnhub); there is no
+macro calendar.
+
+**Decision.** A BUY is **REJECTED** ("earnings on <date>, within N trading days") when the symbol reports earnings
+within **N = 2 trading days** (starting value, D-005), counted by the same trading-day rule the earnings trigger uses
+(moved to `application`, one rule in one place). A configured calendar that fails → REJECTED (D-001, as with no
+ATR); no calendar bean → no blackout, logged. SELLs and protective exits are never blocked.
+
+**Not taken.** Reducing the size instead of rejecting (needs a second sizing rule); macro events (no data source —
+after the vacation); doing nothing until Aika is back.
+
+---
+
 ## D-004 — Trailing take-profit (2026-11-14)
 
 **Context.** `Verdict.takeProfit` was a fixed level fired once by `ExitGuard`.
@@ -177,6 +197,23 @@ Infrastructure choices made while preparing the cloud week; none changes how a v
   deliberate difference between the copies besides the rows above), runs every three hours, and logs only lines the
   intake log does not hold yet, so a repeated run commits nothing. `test_backlog.py`'s cap test now expects all seven
   good proposals; `test_backlog_intake_signalbot.py` covers the rest.
+
+## Questions of 2026-11-26, decided without Aika
+
+Aika's instruction (2026-11-26): nothing waits for her. Each question of the queue author got the recommended option,
+or else the one easiest to undo. Things only Aika can do (money, keys, accounts, repository settings, build files,
+live calls) are listed in `docs/backlog/QUESTIONS-BEFORE-LEAVE.md` under "After the vacation", not queued.
+
+- **Event filter** → D-006 (earnings only). Undo: the property to 0.
+- **Insider buys in the Claude prompt** → not added; the line (SB-411) stays in the lab until H-001 is measured. Not
+  taken: adding it now (a verdict input nobody measured). Undo: one `append` in `ClaudePromptBuilder`.
+- **Lab label rule** (SB-515: < 30 trades → candidate; Bonferroni bar on |t|; holdout must agree) → kept as written,
+  constants marked "lab starting rule". Not taken: no multiple-testing correction (overstates edges). Undo: the
+  constants in `LabelRule`.
+- **Debounce key** → stays the symbol only (pinned by SB-229). Not taken: symbol + trigger type (more Claude calls
+  per symbol). Undo: the key in `SignalDispatcher.dispatch`.
+- **Lab as a Gradle module, PIT plugin** → not now: both need build files, which agents may not change. The lab stays
+  in `application/lab`; mutation testing stays by hand (SB-701…SB-717).
 
 ## Backlog run (December 2026)
 

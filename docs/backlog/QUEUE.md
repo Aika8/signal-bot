@@ -371,11 +371,47 @@ them as input. No live Claude call in tests.
 - size: S
 - paths: `README.md`
 - verify: `grep -nE 'ATR|EXIT_TRAIL|V7|in R|screen' README.md`
-- expect: the README describes the `screen` CLI, the exit guard with the ATR stop and the trailing take-profit, migrations V1–V7, risk per trade in R and position size from the stop, and links DECISIONS.md D-001…D-005
+- expect: the README describes the `screen` CLI, the exit guard with the ATR stop and the trailing take-profit, migrations V1–V7, risk per trade in R and position size from the stop, and links DECISIONS.md D-001…D-006 (the earnings blackout only if SB-020 is merged)
 
 Step 7 of the ATR plan, docs. Update only what changed; keep "No real orders, ever" and the private-adapter rule
 word for word. The "Risk limits" section: concentration now caps the size; add risk 1 % (cap 2 %) per trade.
 Do not mention values other than those in DECISIONS.md.
+
+### SB-018 — Trading days: one rule in `application`
+- status: todo
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/calendar/TradingDays.java`, `application/src/test/java/io/github/signalbot/application/calendar/TradingDaysTest.java`, `adapters/src/main/java/io/github/signalbot/trigger/EarningsPoller.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.calendar.TradingDaysTest' :adapters:test --tests 'io.github.signalbot.trigger.*'`
+- expect: green; `TradingDays.withinTradingDays(from, target, max)` behaves exactly as `EarningsPoller.withinTradingDays` did (the new test repeats `EarningsPollerTest`'s cases plus a weekend target and max 0); `EarningsPoller.withinTradingDays` stays as a static method that delegates, so `EarningsPollerTest` passes unchanged
+
+D-006 needs the trading-day rule of the earnings trigger in `application`; move it there (pure, no Spring) instead of
+writing a second one. Holidays are still ignored (Javadoc says so).
+
+### SB-019 — Earnings blackout (pure)
+- status: todo
+- depends: SB-018
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/risk/EarningsBlackout.java`, `application/src/test/java/io/github/signalbot/application/risk/EarningsBlackoutTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.risk.EarningsBlackoutTest'`
+- expect: green; with N = 2, earnings tomorrow or the next trading day block (the reason names the date), in 3 trading days does not, Friday → Monday counts one trading day, N = 0 never blocks, no events never block
+
+D-006, read it whole. `static Optional<String> blocks(LocalDate today, List<EarningsEvent> events, int tradingDays)`
+using `TradingDays` (SB-018). N is a parameter: its starting value lives in configuration (SB-020), not here.
+
+### SB-020 — Live path: no BUY just before earnings
+- status: todo
+- depends: SB-009, SB-019
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/trigger/LiveDecisionHandler.java`, `adapters/src/main/java/io/github/signalbot/config/**`, `adapters/src/main/resources/application.yml`, `adapters/src/test/java/io/github/signalbot/trigger/LiveDecisionEarningsBlackoutTest.java`
+- verify: `./gradlew build`
+- expect: green; the new test shows a BUY with earnings in 1 trading day REJECTED with the reason and never submitted, a BUY with earnings in 5 trading days submitted, a failing calendar → REJECTED "earnings calendar unavailable", no calendar bean → submitted, and a SELL never checked; every existing test passes unchanged
+
+D-006. Property `signalbot.risk.earnings-blackout-trading-days` (default `2` in `application.yml`, comment "starting
+value, D-006/D-005"; `0` = off) in a new `@ConfigurationProperties` record under `config/`. In `handle`, for a BUY,
+before the ATR step of SB-009: `EarningsCalendar.upcoming(symbol, today, today + 14 days)` through an
+`ObjectProvider<EarningsCalendar>`, then `EarningsBlackout.blocks`. Rejections are notified like other rejections.
+Constructor rule of the queue header: the existing constructors stay (delegating, blackout off), the new one is
+`@Autowired`.
 
 ## Tests: pin what exists (new test files only, no production code)
 
@@ -1482,14 +1518,16 @@ Method: the section header. The class: `AD/persistence/PaperPortfolioReader.java
 
 Method: the section header. The class: `AD/telegram/PaperStateFormatter.java`.
 
-### SB-709 — Mutations: EarningsPoller window
+### SB-709 — Mutations: the trading-day rule
 - status: todo
+- depends: SB-018
 - size: S
 - paths: `adapters/src/test/java/io/github/signalbot/trigger/EarningsPollerMutationTest.java`, `docs/backlog/reports/SB-709.md`
-- verify: `git diff --exit-code origin/main -- adapters/src/main/java/io/github/signalbot/trigger/EarningsPoller.java && ./gradlew :adapters:test --tests 'io.github.signalbot.trigger.EarningsPollerMutationTest'`
-- expect: the class is unchanged; green; the report lists ≥ 8 mutants of `withinTradingDays` and `isWeekday` and every one is killed or argued equivalent
+- verify: `git diff --exit-code origin/main -- application/src/main/java/io/github/signalbot/application/calendar/TradingDays.java && ./gradlew :adapters:test --tests 'io.github.signalbot.trigger.EarningsPollerMutationTest'`
+- expect: the class is unchanged; green; the report lists ≥ 8 mutants of the trading-day rule and every one is killed or argued equivalent
 
-Method: the section header. Mutate only `withinTradingDays` and `isWeekday` (`poll` needs a clock).
+Method: the section header. The rule lives in `A/calendar/TradingDays.java` since SB-018; the new test goes through
+`EarningsPoller.withinTradingDays` (which delegates) so it also guards the delegation.
 
 ### SB-710 — Mutations: Atr
 - status: todo
