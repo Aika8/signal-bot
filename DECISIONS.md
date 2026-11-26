@@ -172,6 +172,12 @@ Infrastructure choices made while preparing the cloud week; none changes how a v
   lost its `JdbcClient`; `ScreenRunner` would also have run the screener at worker startup. The CLI keeps its own
   entry point (`./gradlew screen`).
 
+- **Intake without a daily cap (2026-11-26, Aika: "лучше пусть останется не доделанным чем закончатся").** signal-bot's
+  `backlog.py intake` moves every proposal that passes the filter (learning-exchange keeps its cap of 5 — the one
+  deliberate difference between the copies besides the rows above), runs every three hours, and logs only lines the
+  intake log does not hold yet, so a repeated run commits nothing. `test_backlog.py`'s cap test now expects all seven
+  good proposals; `test_backlog_intake_signalbot.py` covers the rest.
+
 ## Backlog run (December 2026)
 
 Decisions the cloud agents took without Aika, one bullet each (task id, question, choice, options not taken).
