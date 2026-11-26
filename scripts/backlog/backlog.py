@@ -18,7 +18,7 @@ Commands
   paused                       exit 0 when docs/backlog/PAUSE exists (agents stop), 1 otherwise
   check-paths --branch B (--base REF | --files FILE)
                                exit 0 when the PR's changed files are allowed for its branch, 1 with reasons
-  intake [--date YYYY-MM-DD]   move at most 5 small, checkable proposals of that day into QUEUE.md
+  intake [--date YYYY-MM-DD]   move the small, checkable proposals of that day into QUEUE.md (no daily cap)
   automerge [--dry-run]        merge every open agent PR that passed all gates (GitHub Actions only)
   plan                         the executor's move for this run: PAUSED | PARK | FIX | REBASE | CI-RED |
                                WIP-LIMIT | NOTHING | NEW <task>
@@ -44,7 +44,6 @@ PROPOSALS_DIR = Path("docs/backlog/proposals")
 INTAKE_LOG = Path("docs/backlog/intake-log.md")
 DEFAULT_REPO = "Aika8/signal-bot"
 MAX_DESCRIPTION_CHARS = 6000  # ≈ 1500 tokens
-MAX_INTAKE_PER_DAY = 5
 MAX_OPEN_AGENT_PRS = 3
 
 # Nobody but Aika changes these (an agent PR touching one is not merged, whatever its task says).
@@ -572,8 +571,6 @@ def intake(day: str, root: Path = ROOT) -> tuple[list[str], list[str]]:
             if src in taken_sources:
                 continue
             probs = proposal_problems(p, tasks)
-            if not probs and already_today + len(accepted) >= MAX_INTAKE_PER_DAY:
-                probs = [f"daily cap of {MAX_INTAKE_PER_DAY} reached"]
             if probs:
                 rejected.append(f"{src} «{p.title}»: {'; '.join(probs)}")
                 continue
@@ -591,16 +588,19 @@ def intake(day: str, root: Path = ROOT) -> tuple[list[str], list[str]]:
     if new_text:
         body = queue_file.read_text(encoding="utf-8").rstrip("\n") + "\n"
         if "## Added by intake" not in body:
-            body += "\n## Added by intake\n\nAppended by `scripts/backlog/backlog.py intake`, at most "\
-                    f"{MAX_INTAKE_PER_DAY} a day.\n"
+            body += "\n## Added by intake\n\nAppended by `scripts/backlog/backlog.py intake` (signal-bot: no daily cap).\n"
         queue_file.write_text(body + new_text, encoding="utf-8")
     if accepted or rejected:
         log = root / INTAKE_LOG
         prev = log.read_text(encoding="utf-8") if log.exists() else "# Intake log\n"
-        entry = f"\n## {day}\n" + "".join(f"- accepted: {a}\n" for a in accepted) + \
-                "".join(f"- left for Aika: {r}\n" for r in rejected)
-        if f"\n## {day}\n" not in prev:
-            log.write_text(prev.rstrip("\n") + "\n" + entry, encoding="utf-8")
+        # signal-bot: intake runs several times a day; log only lines the log does not hold yet (a rejected
+        # proposal is seen again by every run and must not be logged — or committed — again).
+        lines = [f"- accepted: {a}\n" for a in accepted] + [f"- left for Aika: {r}\n" for r in rejected]
+        lines = [x for x in lines if x not in prev]
+        if lines:
+            heads = re.findall(r"^## (.+)$", prev, re.M)
+            head = "" if heads and heads[-1].strip() == day else f"\n## {day}\n"
+            log.write_text(prev.rstrip("\n") + "\n" + head + "".join(lines), encoding="utf-8")
     return accepted, rejected
 
 
