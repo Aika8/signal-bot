@@ -120,12 +120,11 @@ class RiskLimitEvaluatorTest {
     }
 
     @Test
-    void concentrationCapBlocksOversizedBuy() {
+    void concentrationAboveCapNoLongerRejectsBuy() {
         RiskContext ctx = with(healthy(), null, 1, true,
                 NOW.minus(Duration.ofHours(48)), new BigDecimal("200000"), new BigDecimal("150000"), null, null);
         RiskDecision decision = evaluator.evaluate(verdict(Action.BUY), ctx);
-        assertFalse(decision.allowed());
-        assertEquals(RejectionReason.SYMBOL_CONCENTRATION, decision.reason());
+        assertTrue(decision.allowed());
     }
 
     @Test

@@ -3,12 +3,13 @@ package io.github.signalbot.application.risk;
 import io.github.signalbot.domain.model.Action;
 import io.github.signalbot.domain.model.Verdict;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
  * Pure evaluator of the hard risk limits. Returns the first violated limit, so
  * the rejection reason is deterministic. HOLD verdicts are always allowed.
+ * Single-symbol concentration is not checked here: it caps the BUY size in
+ * {@code PositionSizer} instead of rejecting (D-003).
  */
 public final class RiskLimitEvaluator {
 
@@ -46,11 +47,6 @@ public final class RiskLimitEvaluator {
                     "Max " + limits.maxOpenPositions() + " open positions reached");
         }
 
-        if (action == Action.BUY && breachesConcentration(ctx)) {
-            return RiskDecision.reject(RejectionReason.SYMBOL_CONCENTRATION,
-                    "Single-symbol cap of " + limits.maxSingleSymbolPct() + " would be exceeded");
-        }
-
         return RiskDecision.allow();
     }
 
@@ -64,15 +60,5 @@ public final class RiskLimitEvaluator {
         }
         Instant earliestSell = ctx.symbolOpenedAt().plus(limits.minHoldingPeriod());
         return ctx.now().isBefore(earliestSell);
-    }
-
-    private boolean breachesConcentration(RiskContext ctx) {
-        BigDecimal total = ctx.totalValueKzt();
-        if (total == null || total.signum() <= 0) {
-            return false;
-        }
-        BigDecimal projected = ctx.currentSymbolValueKzt().add(ctx.orderNotionalKzt());
-        BigDecimal cap = total.multiply(limits.maxSingleSymbolPct());
-        return projected.compareTo(cap) > 0;
     }
 }
