@@ -270,3 +270,13 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   bullet in the system prompt's rules, written as text because `StopPolicy`'s constants are package-private
   (tech debt SB-011-1). Not taken: failing the context on a broken history (would block HOLD/SELL verdicts on a
   number that is only context). Undo: `ContextAssembler.atr` and `ClaudePromptBuilder.atr`.
+- **SB-012** — Details of the trailing take-profit in `ExitGuard` that D-004 leaves open. Choices: (1) `ExitSignal`
+  gains a nullable `suggestedLimit` (EXIT_TRAIL: breakout price − spread; stop and fixed TP: `null`) and keeps a
+  4-argument constructor, so existing callers compile unchanged; (2) `state(symbol)` returns an
+  `Optional<TrailingState(best, activated)>`, empty when the symbol has no trailing armed; (3) `best` is `null`
+  exactly when not activated — `restore` with an inconsistent pair throws `IllegalArgumentException`, and
+  `TrailingLevels` refuses a negative offset or spread; (4) the stop, fixed TP and trailing exit each fire once,
+  independently, as the existing levels did (the handler disarms on any exit anyway); `arm` and `armTrailing`
+  replace each other and reset the trailing state; (5) the activation tick sets best = price and cannot exit on the
+  same tick. Not taken: silently accepting an inconsistent restored state (would hide a persistence bug); a
+  separate per-symbol trailing map (two maps could drift apart). Undo: `ExitGuard.onTrailingPrice`.
