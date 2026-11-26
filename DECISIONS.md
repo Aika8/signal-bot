@@ -303,3 +303,13 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   `, limit <value>`; (4) the limit is not rounded to a tick (the ATR spread is unrounded, as in SB-013). Not taken:
   updating the row after insert (the task forbids it); putting the limit into the first prompt line (would change
   the line existing tests and the operator already read). Undo: `ExitGuardHandler.handle`.
+- **SB-016** — Details of "Trades in R" in the nightly review. Choices: (1) a closed trade is every SELL with a
+  `result_r` (a partial SELL counts as its own trade, as SB-015 stores R per SELL); SELLs without R are counted
+  and shown as `left out (no 1R): n`, as `RMultiple`'s Javadoc promised; (2) `Expectancy` computes E as
+  `(Σ wins − Σ |losses|) / n`, the D-004 formula without rounding intermediate values, scale 4 HALF_UP; the review
+  shows R values to 2 decimals HALF_UP, the win rate as a whole percent, E with a sign (`+0.38R`); (3) the section
+  goes into the summary Claude receives and is appended verbatim after Claude's written review, so the stored and
+  pushed review always carries the code's numbers even when Claude omits or restates them; (4) "too few trades to
+  judge" below 20 trades in R (`ExpectancySection.MIN_TRADES_TO_JUDGE`). Not taken: relying on Claude to repeat
+  the numbers (the task forbids Claude computing them); counting trades without R as 0R (would distort E). Undo:
+  `NightlyReviewJob.run` and `ExpectancySection.format`.
