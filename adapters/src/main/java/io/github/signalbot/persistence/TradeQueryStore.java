@@ -78,4 +78,25 @@ public class TradeQueryStore {
                 .param("r", resultR).param("executionId", executionId)
                 .update();
     }
+
+    /**
+     * Results in R ({@code paper_trade.result_r}, SB-015) of every closed trade so far — every SELL with a result in
+     * R, oldest first. Input for the nightly review's expectancy (SB-016).
+     */
+    public List<BigDecimal> closedResultsR() {
+        return db.sql("""
+                        SELECT result_r FROM paper_trade
+                        WHERE action = 'SELL' AND result_r IS NOT NULL
+                        ORDER BY filled_at, id
+                        """)
+                .query(BigDecimal.class)
+                .list();
+    }
+
+    /** Number of SELL trades so far without a result in R (no usable 1R), so left out of the expectancy. */
+    public long closedWithoutRCount() {
+        Long count = db.sql("SELECT COUNT(*) FROM paper_trade WHERE action = 'SELL' AND result_r IS NULL")
+                .query(Long.class).single();
+        return count == null ? 0L : count;
+    }
 }
