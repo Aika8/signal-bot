@@ -1,5 +1,6 @@
 package io.github.signalbot.domain.model;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -15,6 +16,8 @@ import java.util.List;
  * @param previousVerdict the last verdict for this symbol, or null if none
  * @param newsFeedEnabled whether a news feed is configured; false means {@code news} is
  *                        "not available", not "no news"
+ * @param atr             ATR(14) of the symbol on daily bars (D-002), or null when it is not available (no price
+ *                        history configured, the history failed, or too few bars); context for Claude, not a gate
  */
 public record DecisionContext(
         String symbol,
@@ -24,10 +27,18 @@ public record DecisionContext(
         List<NewsItem> news,
         PriceSnapshot snapshot,
         Verdict previousVerdict,
-        boolean newsFeedEnabled
+        boolean newsFeedEnabled,
+        BigDecimal atr
 ) {
     public DecisionContext {
         cash = cash == null ? List.of() : List.copyOf(cash);
         news = news == null ? List.of() : List.copyOf(news);
+    }
+
+    /** A context without an ATR ({@code atr} = null, "not available"). */
+    public DecisionContext(String symbol, String triggerReason, Portfolio portfolio, List<CashBalance> cash,
+                           List<NewsItem> news, PriceSnapshot snapshot, Verdict previousVerdict,
+                           boolean newsFeedEnabled) {
+        this(symbol, triggerReason, portfolio, cash, news, snapshot, previousVerdict, newsFeedEnabled, null);
     }
 }

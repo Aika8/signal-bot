@@ -7,6 +7,9 @@ import io.github.signalbot.domain.model.Position;
 import io.github.signalbot.domain.model.Verdict;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+
 /** Builds the system and user prompts for one decision. Pure. */
 @Component
 public class ClaudePromptBuilder {
@@ -31,6 +34,7 @@ public class ClaudePromptBuilder {
             - The DEFAULT answer is HOLD. Only propose BUY or SELL when the context clearly supports it.
             - Always fill "whatChanged"; if nothing changed since the last verdict, say so explicitly.
             - Keep "rationale" to one sentence. Do not include any text outside the JSON object.
+            - For a BUY the stop must be 1.5-3 ATR below entry; otherwise code replaces it with entry - 2 ATR.
             """;
 
     public String systemPrompt() {
@@ -47,6 +51,7 @@ public class ClaudePromptBuilder {
         } else {
             sb.append("Last price: not available (no market-data feed configured)\n");
         }
+        sb.append("ATR(14): ").append(atr(ctx)).append('\n');
         sb.append("Previous verdict: ").append(previousVerdict(ctx.previousVerdict())).append('\n');
 
         sb.append("Portfolio total (KZT): ")
@@ -83,6 +88,21 @@ public class ClaudePromptBuilder {
             }
         }
         return sb.toString();
+    }
+
+    /** {@code 3.70 (2.1% of last)}; without a usable last price just {@code 3.70}; no ATR: "not available". */
+    private static String atr(DecisionContext ctx) {
+        BigDecimal atr = ctx.atr();
+        if (atr == null) {
+            return "not available";
+        }
+        String value = atr.setScale(2, RoundingMode.HALF_UP).toPlainString();
+        BigDecimal last = ctx.snapshot() == null ? null : ctx.snapshot().last();
+        if (last == null || last.signum() <= 0) {
+            return value;
+        }
+        BigDecimal pct = atr.multiply(BigDecimal.valueOf(100)).divide(last, 1, RoundingMode.HALF_UP);
+        return value + " (" + pct.toPlainString() + "% of last)";
     }
 
     private static String previousVerdict(Verdict v) {
