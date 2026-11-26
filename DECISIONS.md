@@ -227,3 +227,8 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   so today's bar is left out even after the close. Also: `o` and `v` are as strict as `h`/`l`/`c`/`t`, and a bar
   `DailyBar` rejects (e.g. `h < l`) is a `SourceFailureException`. Not taken: an `end` query parameter (behaviour at
   the day boundary harder to test without a live call); keeping today's bar after 16:00 (needs the market clock).
+- **SB-005** — What does `StopPolicy` do with an ATR of zero or below (flat bars give ATR 0, and `entry − 2 × 0`
+  would be a stop at the entry, i.e. undefined risk)? Choice: treat it like no ATR — `Optional.empty()`, so the
+  caller rejects the BUY with "no ATR" (D-002: no silent fallback). Also: `forBuy` is static on a final class, like
+  `Atr`, and the ATR stop is not rounded (scale follows the inputs). Not taken: throwing (a data condition, not a
+  programming error, would stop the pipeline); accepting a zero-distance stop.
