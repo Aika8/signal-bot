@@ -29,9 +29,21 @@ public final class ExecutionPromptFormatter {
      */
     public static String format(String symbol, Action action, BigDecimal quantity, BigDecimal refPrice,
                                 BigDecimal stop, SizingInfo sizing) {
+        return format(symbol, action, quantity, refPrice, stop, sizing, null);
+    }
+
+    /**
+     * @param limitPrice the suggested limit stored on the execution (a trailing exit, D-004), or {@code null};
+     *                   when present, a line {@code Suggested limit 109.80} follows the first line
+     */
+    public static String format(String symbol, Action action, BigDecimal quantity, BigDecimal refPrice,
+                                BigDecimal stop, SizingInfo sizing, BigDecimal limitPrice) {
         StringBuilder sb = new StringBuilder();
         sb.append(action).append(' ').append(symbol).append(" x").append(quantity)
                 .append(" (ref ").append(refPrice).append(") — confirm?");
+        if (limitPrice != null) {
+            sb.append('\n').append("Suggested limit ").append(price(limitPrice));
+        }
         if (action != Action.BUY || sizing == null) {
             return sb.toString();
         }

@@ -293,3 +293,13 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   tick; a restored activated state is remembered so the first tick after a restart does not rewrite it. Not taken:
   writing on every tick (the task forbids it); failing startup on an inconsistent row (all guards would be
   unarmed). Undo: `ExecutionService.trailingFor`, `GuardLoader.load`, `TrailingStateWriter.afterPrice`.
+- **SB-014** — How the trailing exit's suggested limit reaches the execution and the prompt. Choices: (1) a
+  five-argument `ExecutionService.submit(verdict, source, ref, sizing, limitPrice)` overload (a four-argument one
+  taking a `BigDecimal` would make `submit(v, s, p, null)` ambiguous) and a ten-argument
+  `ExecutionStore.insertPending` writing `limit_price`; the handler uses them only when the signal carries a
+  suggested limit, so a stop exit takes exactly the old path; (2) `ExecutionRow` gains `limitPrice` as its last
+  component and keeps its 10- and 11-argument constructors; (3) the prompt adds a second line
+  `Suggested limit 109.80` (at least two decimals, as the other prices) and the immediate alert ends with
+  `, limit <value>`; (4) the limit is not rounded to a tick (the ATR spread is unrounded, as in SB-013). Not taken:
+  updating the row after insert (the task forbids it); putting the limit into the first prompt line (would change
+  the line existing tests and the operator already read). Undo: `ExitGuardHandler.handle`.

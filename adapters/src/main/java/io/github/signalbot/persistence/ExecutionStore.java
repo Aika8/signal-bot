@@ -21,13 +21,20 @@ public class ExecutionStore {
     public record ExecutionRow(
             long id, String symbol, Action action, ExecutionSource source, BigDecimal quantity,
             BigDecimal stop, BigDecimal takeProfit, BigDecimal refPrice, ExecutionState state, Instant pushedAt,
-            SizingInfo sizing) {
+            SizingInfo sizing, BigDecimal limitPrice) {
+
+        /** A row without a suggested limit ({@code limitPrice} is set only for a trailing exit, D-004). */
+        public ExecutionRow(long id, String symbol, Action action, ExecutionSource source, BigDecimal quantity,
+                            BigDecimal stop, BigDecimal takeProfit, BigDecimal refPrice, ExecutionState state,
+                            Instant pushedAt, SizingInfo sizing) {
+            this(id, symbol, action, source, quantity, stop, takeProfit, refPrice, state, pushedAt, sizing, null);
+        }
 
         /** A row without sizing facts (exits, SELLs, rows from before V7). */
         public ExecutionRow(long id, String symbol, Action action, ExecutionSource source, BigDecimal quantity,
                             BigDecimal stop, BigDecimal takeProfit, BigDecimal refPrice, ExecutionState state,
                             Instant pushedAt) {
-            this(id, symbol, action, source, quantity, stop, takeProfit, refPrice, state, pushedAt, null);
+            this(id, symbol, action, source, quantity, stop, takeProfit, refPrice, state, pushedAt, null, null);
         }
     }
 
@@ -52,12 +59,22 @@ public class ExecutionStore {
     public long insertPending(String symbol, Action action, ExecutionSource source, BigDecimal quantity,
                               BigDecimal stop, BigDecimal takeProfit, BigDecimal refPrice, Instant pushedAt,
                               SizingInfo sizing) {
+        return insertPending(symbol, action, source, quantity, stop, takeProfit, refPrice, pushedAt, sizing, null);
+    }
+
+    /**
+     * Inserts a PENDING row with its sizing facts and the suggested limit of a trailing exit (D-004, V7
+     * {@code limit_price}); either may be {@code null}.
+     */
+    public long insertPending(String symbol, Action action, ExecutionSource source, BigDecimal quantity,
+                              BigDecimal stop, BigDecimal takeProfit, BigDecimal refPrice, Instant pushedAt,
+                              SizingInfo sizing, BigDecimal limitPrice) {
         return db.sql("""
                         INSERT INTO executions (symbol, action, source, quantity, stop, take_profit,
                                                 ref_price, state, pushed_at, stop_source, claude_stop, atr,
-                                                risk_per_share, risk_kzt, claude_quantity)
+                                                risk_per_share, risk_kzt, claude_quantity, limit_price)
                         VALUES (:symbol, :action, :source, :qty, :stop, :tp, :ref, 'PENDING', :pushedAt,
-                                :stopSource, :claudeStop, :atr, :riskPerShare, :riskKzt, :claudeQty)
+                                :stopSource, :claudeStop, :atr, :riskPerShare, :riskKzt, :claudeQty, :limit)
                         RETURNING id
                         """)
                 .param("symbol", symbol).param("action", action.name()).param("source", source.name())
@@ -70,6 +87,7 @@ public class ExecutionStore {
                 .param("riskPerShare", sizing == null ? null : sizing.riskPerShare(), java.sql.Types.NUMERIC)
                 .param("riskKzt", sizing == null ? null : sizing.riskKzt(), java.sql.Types.NUMERIC)
                 .param("claudeQty", sizing == null ? null : sizing.claudeQuantity(), java.sql.Types.NUMERIC)
+                .param("limit", limitPrice, java.sql.Types.NUMERIC)
                 .query(Long.class).single();
     }
 
@@ -170,7 +188,7 @@ public class ExecutionStore {
                 ExecutionSource.valueOf(rs.getString("source")), rs.getBigDecimal("quantity"),
                 rs.getBigDecimal("stop"), rs.getBigDecimal("take_profit"), rs.getBigDecimal("ref_price"),
                 ExecutionState.valueOf(rs.getString("state")), rs.getTimestamp("pushed_at").toInstant(),
-                sizing(rs));
+                sizing(rs), rs.getBigDecimal("limit_price"));
     }
 
     /** The V7 sizing columns, or {@code null} when none is set (old rows, exits, SELLs). */

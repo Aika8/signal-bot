@@ -70,12 +70,28 @@ public class ExecutionService {
 
     /** Submit a verdict; {@code sizing} is stored with the PENDING row, or {@code null} when there is none. */
     public long submit(Verdict verdict, ExecutionSource source, BigDecimal refPrice, SizingInfo sizing) {
+        return submit(verdict, source, refPrice, sizing, null);
+    }
+
+    /**
+     * Submit a verdict with a suggested limit price (a trailing exit, D-004: breakout − spread). The limit is
+     * stored with the PENDING row before the prompt goes out, so the prompt can show it; {@code sizing} and
+     * {@code limitPrice} may each be {@code null}.
+     */
+    public long submit(Verdict verdict, ExecutionSource source, BigDecimal refPrice, SizingInfo sizing,
+                       BigDecimal limitPrice) {
         Instant now = Instant.now();
-        long id = sizing == null
-                ? store.insertPending(verdict.symbol(), verdict.action(), source, verdict.quantity(),
-                        verdict.stop(), verdict.takeProfit(), refPrice, now)
-                : store.insertPending(verdict.symbol(), verdict.action(), source, verdict.quantity(),
-                        verdict.stop(), verdict.takeProfit(), refPrice, now, sizing);
+        long id;
+        if (limitPrice != null) {
+            id = store.insertPending(verdict.symbol(), verdict.action(), source, verdict.quantity(),
+                    verdict.stop(), verdict.takeProfit(), refPrice, now, sizing, limitPrice);
+        } else if (sizing == null) {
+            id = store.insertPending(verdict.symbol(), verdict.action(), source, verdict.quantity(),
+                    verdict.stop(), verdict.takeProfit(), refPrice, now);
+        } else {
+            id = store.insertPending(verdict.symbol(), verdict.action(), source, verdict.quantity(),
+                    verdict.stop(), verdict.takeProfit(), refPrice, now, sizing);
+        }
         ExecutionGateway gw = gateway.getIfAvailable();
         if (gw != null) {
             gw.promptExecution(id, verdict.symbol(), verdict.action(), verdict.quantity(), refPrice);
