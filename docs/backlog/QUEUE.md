@@ -24,7 +24,9 @@ cap 2 %, band 1.5–3 ATR, activation 2R, offset 1 ATR, spread 0.1 ATR) are used
 
 Constructors: when a task adds a parameter to the constructor of an existing class, the old constructor stays as a
 delegating one, because tests of other tasks construct the class with it (e.g. `PaperWalletImpl`, `ExecutionService`,
-`LiveDecisionHandler`, `ContextAssembler`). New tests of a class that a later ATR step changes pin only behaviour that
+`LiveDecisionHandler`, `ContextAssembler`). The new constructor is marked `@Autowired` (Spring must know which one to
+use; the `@SpringBootTest` tests that would catch it run only in CI). The old one passes safe values for the new
+parameters, so every path its callers use keeps working (no null that a SELL or a fill would dereference). New tests of a class that a later ATR step changes pin only behaviour that
 step keeps; the task says which.
 
 Mockito trap: `ExecutionServiceTest` stubs the existing `insertPending(…)` and verifies the existing 5-argument
@@ -317,7 +319,7 @@ writes `best_price`/`activated` only on activation and on a new best (not on eve
 
 ### SB-014 — A trailing exit becomes a SELL with a suggested limit
 - status: todo
-- depends: SB-013
+- depends: SB-010, SB-013
 - size: S
 - paths: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java`, `adapters/src/main/java/io/github/signalbot/telegram/ExecutionPromptFormatter.java`, `adapters/src/main/java/io/github/signalbot/telegram/TelegramExecutionGateway.java`, `adapters/src/main/java/io/github/signalbot/execution/**`, `adapters/src/main/java/io/github/signalbot/persistence/ExecutionStore.java`, `adapters/src/test/java/io/github/signalbot/trigger/TrailingExitHandlerTest.java`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.trigger.*' --tests 'io.github.signalbot.telegram.*'`
@@ -509,13 +511,13 @@ D-003: "SELL: size = Claude quantity capped at the held quantity". Check the fak
 ### SB-204 — Paper wallet: zero and negative quantities
 - status: todo
 - size: S
-- paths: `adapters/src/test/java/io/github/signalbot/persistence/PaperWalletQuantityTest.java`, `docs/backlog/reports/SB-204.md`
-- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.persistence.PaperWalletQuantityTest'`
-- expect: green; the report `docs/backlog/reports/SB-204.md` says what `applyAt` does with a BUY of quantity 0, a BUY of −5 and a SELL of 0, and whether each books a trade
+- paths: `docs/backlog/reports/SB-204.md`
+- verify: `test -s docs/backlog/reports/SB-204.md && grep -c 'quantity' docs/backlog/reports/SB-204.md`
+- expect: the report says, with the code lines, what `applyAt` does with a BUY of quantity 0, a BUY of −5 and a SELL of 0 on a held position, and whether each books a trade; each that books one has a tech-debt file
 
-The parser refuses such verdicts (`ClaudeVerdictParser`), but `applyAt` itself does not check. Pin only the cases
-where the wallet refuses or does nothing; a case where it books a zero or negative trade is a finding: leave it out of
-the test and write it to the report and to `docs/backlog/tech-debt/` (do not change the code).
+The parser refuses such verdicts (`ClaudeVerdictParser`), but `applyAt` itself does not check. Reading the code is
+enough (HOLD and a SELL without a position are pinned by SB-203); a case that books a zero or negative trade is a
+finding for `docs/backlog/tech-debt/`. No test and no code change.
 
 ### SB-205 — Paper wallet: cash stays consistent over a random sequence
 - status: todo
@@ -776,7 +778,7 @@ Read `FeeModel` and `FeeModelTest`; SB-104 covers single edges, do not repeat th
 - size: S
 - paths: `application/src/test/java/io/github/signalbot/application/trigger/TrailingPropertyTest.java`, `docs/backlog/reports/SB-231.md`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.trigger.TrailingPropertyTest'`
-- expect: green; over 500 random price paths (fixed seed) armed with entry 100, stop 96, activation 108, offset 2: at most one exit per path; no `EXIT_TRAIL` before a price ≥ 108 was seen; every `EXIT_TRAIL` price is below its level and its level ≥ 106; the stop still fires on a path that drops after activation
+- expect: green; over 500 random price paths (fixed seed) armed with entry 100, stop 96, activation 108, offset 2, each path stopped at its first signal (as `ExitGuardHandler` disarms on any exit): at most one exit per path; no `EXIT_TRAIL` before a price ≥ 108 was seen; every `EXIT_TRAIL` price is below its level and its level ≥ 106; the stop still fires on a path that drops after activation
 
 D-004 with its starting values (do not change them). Random walk of ±1.5 per tick, 300 ticks. On failure print the
 seed, path index and the ticks around the exit.
@@ -990,7 +992,7 @@ BigDecimal shares, BigDecimal pricePerShare, char acquiredDisposed, BigDecimal s
 boolean amendment)` — `officerTitle` and `pricePerShare` may be null (a gift has no price), the rest not.
 `enum InsiderRole { DIRECTOR, OFFICER, TEN_PERCENT_OWNER, OTHER }`. Port `InsiderFilings`:
 `List<InsiderTransaction> transactionsFiledBetween(String ticker, LocalDate from, LocalDate to)`, Javadoc as in
-`PriceHistory`/D-001 (failure throws `SourceFailureException`; empty = none filed). No adapter implements it yet.
+`MarketDataFeed`/D-001 (failure throws `SourceFailureException`; empty = none filed). No adapter implements it yet.
 
 ### SB-402 — Form 4 parser: one open-market purchase
 - status: todo
@@ -1102,7 +1104,7 @@ Pure text for a future prompt line; it is not added to `ClaudePromptBuilder` (Ai
 
 ### SB-412 — Notes on the EDGAR formats as built
 - status: todo
-- depends: SB-403, SB-407, SB-409
+- depends: SB-403, SB-404, SB-407, SB-408, SB-409, SB-410
 - size: S
 - paths: `docs/edgar.md`
 - verify: `grep -nE 'form.idx|ownershipDocument|transactionCode|submissions|User-Agent|delay' docs/edgar.md`
@@ -1197,9 +1199,10 @@ Dates are calendar dates (`LocalDate`); trading days come from the data later.
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/PointInTimeBars.java`, `application/src/test/java/io/github/signalbot/application/lab/PointInTimeBarsTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.PointInTimeBarsTest'`
-- expect: green; `asOf(date)` returns the bars up to and including that date, oldest first; asking for a later bar through the view throws `IllegalStateException` naming the date; bars not sorted or with duplicate dates are refused at construction
+- expect: green; `view(asOf).bars()` returns an unmodifiable list of the bars up to and including `asOf`, oldest first; `view(asOf).on(date)` returns the bar of that date and throws `IllegalStateException` naming both dates when `date` is after `asOf`; bars not sorted or with duplicate dates are refused at construction
 
-Pure. `record`-like class over `List<DailyBar>` of one symbol; `asOf` returns an unmodifiable view.
+Pure. `PointInTimeBars(List<DailyBar>)` for one symbol; `view(LocalDate asOf)` returns a small `BarView` with
+`bars()` and `on(LocalDate)`. SB-511 gives a signal only `view(d).bars()`.
 
 ### SB-509 — Lab: a universe that keeps delisted symbols
 - status: todo
@@ -1230,7 +1233,7 @@ committed; say how in its first comment line.
 - expect: green; on a hand-made series, an entry signal on day d enters at the open of d + 1; the stop is `StopPolicy.forBuy(entry, null, Atr.wilder(bars up to d, 14))` (the D-002 rule, reused, not re-implemented); the exit is the stop or the close after `holdDays`; a gap under the stop exits at the open (worse than the stop); each trade reports its result in R
 
 One symbol, long only, no fees, no sizing. The signal is a `Predicate<List<DailyBar>>` that only gets
-`PointInTimeBars.asOf(d)`. Test that a signal reading the future cannot (it gets no later bars).
+`PointInTimeBars.view(d).bars()`. Test that a signal reading the future cannot (it gets no later bars).
 
 ### SB-512 — Lab: fees in the backtest
 - status: todo
@@ -1245,7 +1248,7 @@ caller passes one built on it later.
 
 ### SB-513 — Lab: trailing take-profit in the backtest
 - status: todo
-- depends: SB-511, SB-012
+- depends: SB-512, SB-012
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/Backtest.java`, `application/src/test/java/io/github/signalbot/application/lab/BacktestTrailingTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.*'`
@@ -1258,15 +1261,16 @@ conservative choice (stop checked first); say so in the Javadoc.
 - status: todo
 - depends: SB-507, SB-511
 - size: S
-- paths: `application/src/main/java/io/github/signalbot/application/lab/WalkForward.java`, `application/src/test/java/io/github/signalbot/application/lab/WalkForwardTest.java`
+- paths: `application/src/main/java/io/github/signalbot/application/lab/WalkForward.java`, `application/src/main/java/io/github/signalbot/application/lab/Backtest.java`, `application/src/test/java/io/github/signalbot/application/lab/WalkForwardTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.WalkForwardTest'`
 - expect: green; trades are collected only from test parts, each tagged with its window; a trade entered in one test part and still open at its end is closed at that end's close; windows with no trade are reported with n 0
 
-Pure; uses `TimeSplits` (SB-507) and `Backtest` (SB-511) as they are.
+Pure; uses `TimeSplits` (SB-507) and `Backtest` (SB-511). `Backtest` gains an optional "close what is open at the
+last bar" exit (kind `END_OF_DATA`) — off by default, so `BacktestTest` and the other lab tests pass unchanged.
 
 ### SB-515 — Lab: from numbers to a label
 - status: todo
-- depends: SB-504, SB-506
+- depends: SB-501, SB-504, SB-506
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/LabelRule.java`, `application/src/test/java/io/github/signalbot/application/lab/LabelRuleTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.LabelRuleTest'`
@@ -1287,7 +1291,7 @@ Pure; the log file itself (`docs/lab/experiments/H-NNN.md`) is written by whoeve
 
 ### SB-517 — Lab: the report
 - status: todo
-- depends: SB-505, SB-515
+- depends: SB-501, SB-505, SB-515
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/LabReport.java`, `application/src/test/java/io/github/signalbot/application/lab/LabReportTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.LabReportTest'`
@@ -1297,11 +1301,11 @@ Pure; inputs are values (hypothesis, `SampleStats`, interval, holdout mean, labe
 
 ### SB-518 — Lab: one run end to end on the fixture
 - status: todo
-- depends: SB-510, SB-514, SB-517
+- depends: SB-509, SB-510, SB-514, SB-517
 - size: S
 - paths: `adapters/src/test/java/io/github/signalbot/lab/LabEndToEndTest.java`, `adapters/src/test/resources/lab/**`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.lab.LabEndToEndTest'`
-- expect: green; CSV fixture → walk-forward backtest of a simple rule (close above the 20-day high) → stats → label → report; two runs give the identical report; the delisted symbol's trades are in it
+- expect: green; CSV fixture → walk-forward backtest of a simple rule (close above the 20-day high) → stats → label → report; two runs give the identical report; the test checks on the trade list (not the report) that the delisted symbol produced trades, and the report's delisted count comes from `Universe` (SB-509), not a second count
 
 This proves the pipe, not the rule: the test asserts determinism and structure, not that the rule makes money.
 
@@ -1344,11 +1348,11 @@ Telegram message (4 096 characters) for 10 entries — the formatter cuts and sa
 
 ### SB-602 — Journal query over decisions, executions and trades
 - status: todo
-- depends: SB-015, SB-601
+- depends: SB-014, SB-015, SB-601
 - size: S
 - paths: `adapters/src/main/java/io/github/signalbot/persistence/JournalStore.java`, `adapters/src/test/java/io/github/signalbot/persistence/JournalStoreIntegrationTest.java`
 - verify: `./gradlew build`
-- expect: green; in CI (Docker) the test ran: a filled BUY execution gets the rationale of the latest BUY decision for its symbol created at or before the execution's `pushed_at`; a closing SELL fill adds exit price, exit kind (EXIT source → exit type, VERDICT → `verdict`) and `result_r`; an execution without a matching decision gets a null reason; locally the test is skipped
+- expect: green; in CI (Docker) the test ran: a filled BUY execution gets the rationale of the latest BUY decision for its symbol created at or before the execution's `pushed_at`; a closing SELL fill adds exit price, exit kind and `result_r` — exit kind is `verdict` for source VERDICT, `trail` for source EXIT with a `limit_price` (only trailing exits store one, SB-014), `stop` for source EXIT without; an execution without a matching decision gets a null reason; locally the test is skipped
 
 A new read-only `@Repository` (no change to existing stores or tables). The rationale sits in the stored response JSON
 of `decisions` (read `ClaudeDecisionEngine.store` and V1): extract it in SQL (`response->>'text'` holds Claude's raw
@@ -1359,12 +1363,13 @@ text) or in Java with the existing `ClaudeVerdictParser` — not a second parser
 - status: todo
 - depends: SB-602
 - size: S
-- paths: `adapters/src/main/java/io/github/signalbot/telegram/SignalBotTelegramBot.java`, `adapters/src/main/java/io/github/signalbot/telegram/JournalCommand.java`, `adapters/src/test/java/io/github/signalbot/telegram/JournalCommandTest.java`
+- paths: `adapters/src/main/java/io/github/signalbot/telegram/SignalBotTelegramBot.java`, `adapters/src/main/java/io/github/signalbot/telegram/TelegramConfig.java`, `adapters/src/main/java/io/github/signalbot/telegram/JournalCommand.java`, `adapters/src/test/java/io/github/signalbot/telegram/JournalCommandTest.java`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.telegram.*'`
 - expect: green; `JournalCommand.reply()` returns the formatted last 10 entries from a fake `JournalStore`; a store failure returns a warning line like the `/portfolio` case, not an exception; `/journal` is one more `case` in `handleText` calling it; existing tests unchanged
 
-No live Telegram: the test covers `JournalCommand` only. The bot change is one line in the switch plus the constructor
-parameter (keep the old constructor delegating if any test constructs the bot).
+No live Telegram: the test covers `JournalCommand` only. The bot change is one line in the switch plus a constructor
+parameter; the bot is built by `new SignalBotTelegramBot(…)` in `TelegramConfig` (a `@Bean`), so pass the command
+there too — otherwise `/journal` is never wired.
 
 ### SB-604 — Weekly numbers in R
 - status: todo
@@ -1672,7 +1677,7 @@ Method: the section header. Search with `grep -rn` for arithmetic with `fee`, `f
 
 ### SB-901 — Lab README: how to read a report
 - status: todo
-- depends: SB-518
+- depends: SB-503, SB-518
 - size: S
 - paths: `docs/lab/README.md`
 - verify: `grep -nE 'walk-forward|holdout|delisted|variants|look-ahead|label' docs/lab/README.md`
