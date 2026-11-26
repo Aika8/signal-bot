@@ -232,3 +232,12 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   caller rejects the BUY with "no ATR" (D-002: no silent fallback). Also: `forBuy` is static on a final class, like
   `Atr`, and the ATR stop is not rounded (scale follows the inputs). Not taken: throwing (a data condition, not a
   programming error, would stop the pipeline); accepting a zero-distance stop.
+- **SB-006** — Details of `PositionSizer` that D-003 leaves open. Choices: (1) on a tie the earlier bound in the
+  order RISK, CLAUDE, CONCENTRATION, CASH is reported, so a Claude quantity equal to the risk size is not `CLAUDE`;
+  (2) no Claude quantity (`OptionalLong.empty()`) means no Claude bound; (3) `riskKzt` = final quantity ×
+  `riskPerShareKzt` (the 1R actually taken, fees not included), not the budget; (4) `entry ≤ stop` throws
+  `IllegalArgumentException` instead of a rejection (`StopPolicy` never yields it, so it is a caller bug);
+  (5) `RiskLimits` also refuses a `riskPerTradeCapPct` above 0.02 (D-003's hard cap) or ≤ 0, and a
+  `riskPerTradePct` ≤ 0; (6) a rejection names the bound that made the size < 1 (e.g. "available cash buys less
+  than one share"). Not taken: storing the budget as `riskKzt` (realised R would then be measured against risk not
+  taken); a rejection instead of an exception for `entry ≤ stop` (would hide a bug upstream).
