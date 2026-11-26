@@ -220,3 +220,10 @@ live calls) are listed in `docs/backlog/QUESTIONS-BEFORE-LEAVE.md` under "After 
 ## Backlog run (December 2026)
 
 Decisions the cloud agents took without Aika, one bullet each (task id, question, choice, options not taken).
+
+- **SB-002** — How does the Alpaca adapter leave out the still-open session (the `PriceHistory` contract)? Choice:
+  ask for the newest `count + 1` daily bars (`sort=desc`, `start` = today − (2·count + 10) calendar days, because
+  without `start` Alpaca returns only the current day) and drop any bar dated today or later in `America/New_York`;
+  so today's bar is left out even after the close. Also: `o` and `v` are as strict as `h`/`l`/`c`/`t`, and a bar
+  `DailyBar` rejects (e.g. `h < l`) is a `SourceFailureException`. Not taken: an `end` query parameter (behaviour at
+  the day boundary harder to test without a live call); keeping today's bar after 16:00 (needs the market clock).
