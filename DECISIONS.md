@@ -313,3 +313,12 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   judge" below 20 trades in R (`ExpectancySection.MIN_TRADES_TO_JUDGE`). Not taken: relying on Claude to repeat
   the numbers (the task forbids Claude computing them); counting trades without R as 0R (would distort E). Undo:
   `NightlyReviewJob.run` and `ExpectancySection.format`.
+- **SB-020** — Details of the live earnings blackout that D-006 leaves open. Choices: (1) the check runs after the
+  "no entry price" check and before the ATR step, so a blacked-out BUY never asks for bars; (2) any
+  `RuntimeException` from the calendar (not only `SourceFailureException`, e.g. an open circuit breaker) rejects
+  the BUY with "earnings calendar unavailable (<message>)" — fail closed, D-001; (3) the window asked for is today …
+  today + 14 calendar days, the horizon `TradingDays` already uses; (4) the property lives in a new
+  `RiskProperties` record (`signalbot.risk`), and an absent property binds to 0 (off), while `application.yml`
+  sets the starting value 2; (5) `Clock` is a `@ConditionalOnMissingBean` bean in `ClockConfig`. Not taken:
+  catching only `SourceFailureException` (a breaker exception would then escape `handle` and drop the verdict
+  without a notice). Undo: `LiveDecisionHandler.earningsBlackout`.
