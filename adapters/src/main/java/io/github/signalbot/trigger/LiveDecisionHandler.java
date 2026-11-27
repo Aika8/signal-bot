@@ -1,6 +1,7 @@
 package io.github.signalbot.trigger;
 
 import io.github.signalbot.application.risk.Atr;
+import io.github.signalbot.application.risk.EarningsBlackout;
 import io.github.signalbot.application.risk.PositionSizer;
 import io.github.signalbot.application.risk.RiskContext;
 import io.github.signalbot.application.risk.RiskDecision;
@@ -11,17 +12,20 @@ import io.github.signalbot.application.risk.StopDecision;
 import io.github.signalbot.application.risk.StopPolicy;
 import io.github.signalbot.application.trigger.TriggerSignal;
 import io.github.signalbot.config.FxConverter;
+import io.github.signalbot.config.RiskProperties;
 import io.github.signalbot.domain.model.Action;
 import io.github.signalbot.domain.model.CashBalance;
 import io.github.signalbot.domain.model.Ccy;
 import io.github.signalbot.domain.model.DailyBar;
 import io.github.signalbot.domain.model.DecisionContext;
+import io.github.signalbot.domain.model.EarningsEvent;
 import io.github.signalbot.domain.model.Portfolio;
 import io.github.signalbot.domain.model.Position;
 import io.github.signalbot.domain.model.Venue;
 import io.github.signalbot.domain.model.Verdict;
 import io.github.signalbot.domain.port.DecisionEngine;
 import io.github.signalbot.domain.port.DecisionFailedException;
+import io.github.signalbot.domain.port.EarningsCalendar;
 import io.github.signalbot.domain.port.Notifier;
 import io.github.signalbot.domain.port.PriceHistory;
 import io.github.signalbot.domain.port.SourceFailureException;
@@ -39,6 +43,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -49,7 +54,7 @@ import java.util.OptionalLong;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * The live path: decide -> (BUY: ATR -> stop -> size, D-002/D-003) -> enforce risk limits -> submit a
+ * The live path: decide -> (BUY: earnings blackout, D-006 -> ATR -> stop -> size, D-002/D-003) -> enforce risk limits -> submit a
  * confirmation-gated execution. A BUY without an ATR or whose size is below one share is REJECTED and notified,
  * never submitted with a guessed stop or size. A SELL keeps Claude's quantity (the paper wallet caps it at the
  * held quantity).
@@ -59,6 +64,10 @@ public class LiveDecisionHandler {
 
     private static final Logger LOG = LoggerFactory.getLogger(LiveDecisionHandler.class);
     private static final ZoneId ALMATY = ZoneId.of("Asia/Almaty");
+    /** Earnings dates are US exchange dates (D-006). */
+    private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
+    /** Calendar days of earnings asked for; {@code TradingDays} never looks further ahead. */
+    static final int EARNINGS_LOOKAHEAD_DAYS = 14;
     /** Daily bars asked for: ATR(14) needs 15, the rest lets Wilder's smoothing settle. */
     static final int ATR_BARS = 30;
     static final int ATR_PERIOD = 14;
@@ -78,6 +87,9 @@ public class LiveDecisionHandler {
     private final RiskLimits limits;
     private final PositionSizer sizer;
     private final FeeModel feeModel;
+    private final int blackoutTradingDays;
+    private final ObjectProvider<EarningsCalendar> earningsCalendar;
+    private final Clock clock;
     private final Map<String, Verdict> lastVerdict = new ConcurrentHashMap<>();
 
     public LiveDecisionHandler(ObjectProvider<DecisionEngine> decisionEngine, ContextAssembler assembler,
@@ -93,12 +105,28 @@ public class LiveDecisionHandler {
      * @param limits       the same limits the {@code riskEvaluator} enforces (risk per trade, concentration)
      * @param feeModel     estimated round-trip fees; not used when a BUY is rejected before sizing
      */
-    @Autowired
     public LiveDecisionHandler(ObjectProvider<DecisionEngine> decisionEngine, ContextAssembler assembler,
                                RiskLimitEvaluator riskEvaluator, ObjectProvider<Notifier> notifier,
                                TradeQueryStore tradeQuery, DailyPnlStore dailyPnl, FxConverter fx,
                                ExecutionService executionService, ObjectProvider<PriceHistory> priceHistory,
                                RiskLimits limits, FeeModel feeModel) {
+        this(decisionEngine, assembler, riskEvaluator, notifier, tradeQuery, dailyPnl, fx, executionService,
+                priceHistory, limits, feeModel, RiskProperties.blackoutOff(), null, Clock.systemUTC());
+    }
+
+    /**
+     * @param risk             the earnings blackout in trading days (D-006); 0 = off
+     * @param earningsCalendar the symbol's earnings; an absent bean means no blackout (logged), a failing one
+     *                         rejects the BUY (D-001)
+     * @param clock            "today" for the blackout, taken in {@code America/New_York}
+     */
+    @Autowired
+    public LiveDecisionHandler(ObjectProvider<DecisionEngine> decisionEngine, ContextAssembler assembler,
+                               RiskLimitEvaluator riskEvaluator, ObjectProvider<Notifier> notifier,
+                               TradeQueryStore tradeQuery, DailyPnlStore dailyPnl, FxConverter fx,
+                               ExecutionService executionService, ObjectProvider<PriceHistory> priceHistory,
+                               RiskLimits limits, FeeModel feeModel, RiskProperties risk,
+                               ObjectProvider<EarningsCalendar> earningsCalendar, Clock clock) {
         this.decisionEngine = decisionEngine;
         this.assembler = assembler;
         this.riskEvaluator = riskEvaluator;
@@ -111,6 +139,9 @@ public class LiveDecisionHandler {
         this.limits = limits;
         this.sizer = new PositionSizer(limits);
         this.feeModel = feeModel;
+        this.blackoutTradingDays = risk == null ? 0 : risk.earningsBlackoutTradingDays();
+        this.earningsCalendar = earningsCalendar;
+        this.clock = clock;
     }
 
     public void handle(TriggerSignal signal) {
@@ -156,6 +187,11 @@ public class LiveDecisionHandler {
         BigDecimal entry = refPrice(verdict, ctx);
         if (entry.signum() <= 0) {
             reject(verdict, "no entry price");
+            return;
+        }
+        Optional<String> blackout = earningsBlackout(symbol);
+        if (blackout.isPresent()) {
+            reject(verdict, blackout.get());
             return;
         }
         PriceHistory history = priceHistory == null ? null : priceHistory.getIfAvailable();
@@ -205,6 +241,30 @@ public class LiveDecisionHandler {
         SizingInfo sizing = new SizingInfo(stop.source(), stop.claudeStop(), stop.atr(), entry.subtract(stop.stop()),
                 size.riskKzt(), verdict.quantity());
         executionService.submit(sized, ExecutionSource.VERDICT, entry, sizing);
+    }
+
+    /**
+     * D-006: the rejection reason when the symbol reports earnings within the configured trading days, otherwise
+     * empty. Off (0) or no calendar bean → no blackout; a failing calendar → rejected, never "no earnings" (D-001).
+     */
+    private Optional<String> earningsBlackout(String symbol) {
+        if (blackoutTradingDays <= 0) {
+            return Optional.empty();
+        }
+        EarningsCalendar calendar = earningsCalendar == null ? null : earningsCalendar.getIfAvailable();
+        if (calendar == null) {
+            LOG.info("No earnings calendar configured; earnings blackout skipped for BUY {}", symbol);
+            return Optional.empty();
+        }
+        LocalDate today = LocalDate.now(clock.withZone(NEW_YORK));
+        List<EarningsEvent> events;
+        try {
+            events = calendar.upcoming(symbol, today, today.plusDays(EARNINGS_LOOKAHEAD_DAYS));
+        } catch (RuntimeException e) {
+            LOG.warn("Earnings calendar failed for {}: {}", symbol, e.getMessage());
+            return Optional.of("earnings calendar unavailable (" + e.getMessage() + ")");
+        }
+        return EarningsBlackout.blocks(today, events, blackoutTradingDays);
     }
 
     /**
