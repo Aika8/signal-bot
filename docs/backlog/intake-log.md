@@ -8,3 +8,4 @@ Written by `scripts/backlog/backlog.py intake` (GitHub Actions, daily): which pr
 - left for Aika: docs/backlog/tech-debt/2026-11-27-SB-034-1.md#1 «Do not re-fire an exit whose handler never ran before a restart»: not size S
 - accepted: AUTO-20261127-3 ← issue#64#1 «Isolate each price tick's exit/trailing/evaluator steps from one another's failures»
 - accepted: AUTO-20261127-4 ← issue#67#1 «Split long verdict messages in TelegramNotifier»
+- accepted: AUTO-20261127-5 ← issue#69#1 «Alert the operator when deleting the stored guard fails on a fired exit»
