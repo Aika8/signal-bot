@@ -8,6 +8,37 @@ findings.
 
 ---
 
+## D-009 — The model can only lower risk; text from outside is data (2026-11-27)
+
+Agreed with Aika while reading the code (relayed by the strategy session). **Undo:** revert SB-043.
+
+The model's answer may only make a trade smaller or not happen: it can say HOLD, give a smaller quantity than code
+allows, or a stop that code accepts within the D-002 band. Code alone decides the size (D-003), the stop band (D-002),
+the limits and the blackout (D-006); nothing the model writes raises them. Text from outside the system — news
+headlines and sources, later filings — enters the prompt only as marked, cleaned, length-bounded data, with the
+system prompt saying it is never an instruction (SB-043). No real orders, ever (README) is unchanged.
+
+---
+
+## D-008 — Daily bars are split-adjusted (2026-11-27)
+
+Agreed with Aika while reading the code (relayed by the strategy session). **Undo:** drop the parameter in
+`AlpacaBarsQuery` (SB-041).
+
+**Context.** Alpaca's historical bars default to `adjustment=raw` (docs.alpaca.markets, "Historical bars", checked
+2026-11-27 by the strategy session). On a split day the true range becomes the whole price gap, so ATR(14) is
+inflated for about two weeks and the stop and size (D-002, D-003) are wrong.
+
+**Decision.** Daily bars are requested with `adjustment=split`. Not `all`: the dividend adjustment shifts past prices
+away from the levels that really traded, and the stop is placed against real prices. `feed=sip` (Alpaca's default)
+is passed explicitly, so a change of plan cannot silently switch volume and prices to IEX only. The reference page
+(docs.alpaca.markets/reference/stockbars, read 2026-11-27) gives `feed` default `sip` and says the default `end` is
+"the current time if the user has a real-time access for the feed, otherwise 15 minutes before the current time" —
+so the request sends no `end`, and a plan without real-time SIP still gets completed daily bars. Not checked live (no
+keys in the cloud): if the first live run gets 403 on bars, that is the place to look.
+
+---
+
 ## D-007 — No BUY with a stop at or below zero (2026-11-27, decided without Aika)
 
 **Decided without Aika** (her instruction: nothing waits for her). **Undo:** remove the two guards in
