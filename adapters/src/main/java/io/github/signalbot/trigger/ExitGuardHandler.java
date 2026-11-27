@@ -51,12 +51,22 @@ public class ExitGuardHandler {
         exitGuard.disarm(symbol);
         guardStore.delete(symbol);
 
-        Position held = findPosition(symbol);
+        Position held;
+        try {
+            held = findPosition(symbol);
+        } catch (RuntimeException e) {
+            // D-001: a failed source throws. The guard is already gone, so the alert is the only trace left:
+            // send it without a quantity and submit no SELL (nothing to size it with).
+            LOG.error("Exit {} for {}: portfolio read failed; alerting without a position check",
+                    signal.type(), symbol, e);
+            push(symbol, signal, " (position not checked)");
+            return;
+        }
         if (held == null) {
             LOG.info("Exit {} for {} but no position held; disarmed only", signal.type(), symbol);
             return;
         }
-        push(symbol, signal);
+        push(symbol, signal, "");
         Verdict sell = new Verdict(symbol, Action.SELL, held.quantity(), signal.triggerPrice(),
                 null, null, 1.0, signal.type() + " hit at " + signal.triggerPrice(),
                 Instant.now().plus(Duration.ofMinutes(15)));
@@ -77,9 +87,9 @@ public class ExitGuardHandler {
                 .orElse(null);
     }
 
-    private void push(String symbol, ExitSignal signal) {
+    private void push(String symbol, ExitSignal signal, String note) {
         String message = "SELL " + symbol + " now — " + signal.type() + " hit at " + signal.triggerPrice()
-                + (signal.suggestedLimit() == null ? "" : ", limit " + signal.suggestedLimit());
+                + (signal.suggestedLimit() == null ? "" : ", limit " + signal.suggestedLimit()) + note;
         Notifier n = notifier.getIfAvailable();
         if (n != null) {
             Verdict alert = new Verdict(symbol, Action.SELL, java.math.BigDecimal.ZERO, signal.triggerPrice(),
