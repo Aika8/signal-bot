@@ -22,8 +22,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Every method that changes the armed levels ({@link #arm}, {@link #armTrailing}, {@link #restore},
  * {@link #disarm}, {@link #onPrice}) is {@code synchronized} on this guard, so an arm or disarm never lands
- * between the read and the write of {@code onPrice} and gets overwritten by the old state. The read-only
- * {@link #state} and {@link #armedSymbols} read the concurrent map without the lock.
+ * between the read and the write of {@code onPrice} and gets overwritten by the old state. {@link #snapshot} takes
+ * the same lock, so the levels and the state it returns belong to one armed guard. The read-only {@link #state} and
+ * {@link #armedSymbols} read the concurrent map without the lock.
  */
 public final class ExitGuard {
 
@@ -85,6 +86,18 @@ public final class ExitGuard {
             return Optional.empty();
         }
         return Optional.of(new TrailingState(l.best(), l.activated()));
+    }
+
+    /**
+     * The trailing levels and state of a symbol read together under the guard's lock, or empty when it has no
+     * trailing take-profit armed. A writer that persists the state matches the stored row by these levels (#30).
+     */
+    public synchronized Optional<TrailingSnapshot> snapshot(String symbol) {
+        Levels l = armed.get(symbol);
+        if (l == null || l.trailing() == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new TrailingSnapshot(l.trailing(), l.best(), l.activated()));
     }
 
     public synchronized void disarm(String symbol) {

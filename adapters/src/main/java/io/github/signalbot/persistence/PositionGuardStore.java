@@ -1,6 +1,7 @@
 package io.github.signalbot.persistence;
 
 import io.github.signalbot.application.trigger.TrailingLevels;
+import io.github.signalbot.application.trigger.TrailingSnapshot;
 import io.github.signalbot.application.trigger.TrailingState;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -83,13 +84,42 @@ public class PositionGuardStore {
                 .update();
     }
 
-    /** Stores the trailing state (best price, activation) so a restart does not reset trailing (D-004). */
+    /**
+     * Stores the trailing state (best price, activation) so a restart does not reset trailing (D-004).
+     *
+     * @deprecated writes onto whatever guard the row holds now, even one re-armed after the state was read (#30);
+     *     use {@link #saveTrailingState(String, TrailingSnapshot)}.
+     */
+    @Deprecated
     public void saveTrailingState(String secCode, TrailingState state) {
         db.sql("UPDATE position_guards SET best_price = :best, activated = :activated WHERE sec_code = :sec")
                 .param("best", state.best(), Types.NUMERIC)
                 .param("activated", state.activated())
                 .param("sec", secCode)
                 .update();
+    }
+
+    /**
+     * Stores the trailing state of a snapshot only on the guard row armed with the snapshot's trailing levels (#30):
+     * a state read before a fill re-armed the row with new levels updates nothing. The levels are compared at the
+     * columns' scale (V7: {@code NUMERIC(20, 6)}), so in-memory levels with more decimals still match their own row.
+     *
+     * @return whether a row was updated
+     */
+    public boolean saveTrailingState(String secCode, TrailingSnapshot snapshot) {
+        int updated = db.sql("""
+                        UPDATE position_guards SET best_price = :best, activated = :activated
+                        WHERE sec_code = :sec
+                          AND tp_activation = CAST(:activation AS NUMERIC(20, 6))
+                          AND trail_offset = CAST(:offset AS NUMERIC(20, 6))
+                        """)
+                .param("best", snapshot.best(), Types.NUMERIC)
+                .param("activated", snapshot.activated())
+                .param("sec", secCode)
+                .param("activation", snapshot.levels().activation(), Types.NUMERIC)
+                .param("offset", snapshot.levels().offset(), Types.NUMERIC)
+                .update();
+        return updated > 0;
     }
 
     /** Every persisted guard with its trailing columns (V7). */
