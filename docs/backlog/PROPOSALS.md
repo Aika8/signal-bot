@@ -19,6 +19,10 @@ day that passes the filter into `QUEUE.md` (signal-bot has no daily cap), as tas
 The rest waits for Aika; `docs/backlog/intake-log.md` says why for each. Proposals are taken in file order
 (analyst first, then user; within a file, top to bottom), so put the most valuable first.
 
+The summary run also writes `docs/backlog/proposals/<date>-summary.md`, in its own summary PR, for the parked
+questions it decided (`prompts/summary.md`, 1b). Such a proposal carries `replaces: <parked task id>`: when its task
+is done, the parked task counts as done and its dependents are unblocked (`backlog.py`, signal-bot only).
+
 ## Format
 
 ```markdown
