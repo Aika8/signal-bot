@@ -494,3 +494,8 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   (`CAST(:x AS NUMERIC(20, 6))`), so in-memory levels with more decimals than V7 stores still match their own row.
   Not taken: retrying on every tick (an INFO line and an UPDATE per tick for a write that cannot succeed); comparing
   the raw values (an ATR with more than 6 decimals would never match and no state would ever be saved).
+- **SB-037** — Which context ATR does the BUY gate take as "the ATR Claude saw"? Choice: only a positive
+  `ctx.atr()`; a null (not available) or a zero/negative one falls back to fetching the bars as before, so the
+  rejection reasons ("no ATR: …", "no usable stop") stay exactly as today. Not taken: trusting any non-null
+  `ctx.atr()` (a non-positive one would be rejected with a misleading "not enough daily bars"; `ContextAssembler`
+  never produces one anyway).
