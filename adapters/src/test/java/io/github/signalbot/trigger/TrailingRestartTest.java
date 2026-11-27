@@ -5,6 +5,7 @@ import io.github.signalbot.application.trigger.ExitGuard;
 import io.github.signalbot.application.trigger.ExitSignal;
 import io.github.signalbot.application.trigger.ExitType;
 import io.github.signalbot.application.trigger.TrailingLevels;
+import io.github.signalbot.application.trigger.TrailingSnapshot;
 import io.github.signalbot.application.trigger.TrailingState;
 import io.github.signalbot.application.trigger.TriggerEvaluator;
 import io.github.signalbot.application.trigger.TriggerSettings;
@@ -238,6 +239,20 @@ class TrailingRestartTest {
             StoredGuard old = rows.get(secCode);
             rows.put(secCode, new StoredGuard(secCode, old.stop(), old.takeProfit(), old.trailing(), state.best(),
                     state.activated(), old.riskKzt()));
+        }
+
+        @Override
+        public boolean saveTrailingState(String secCode, TrailingSnapshot snapshot) {
+            stateWrites.add(snapshot.state());
+            StoredGuard old = rows.get(secCode);
+            if (old == null || old.trailing() == null
+                    || old.trailing().activation().compareTo(snapshot.levels().activation()) != 0
+                    || old.trailing().offset().compareTo(snapshot.levels().offset()) != 0) {
+                return false;
+            }
+            rows.put(secCode, new StoredGuard(secCode, old.stop(), old.takeProfit(), old.trailing(), snapshot.best(),
+                    snapshot.activated(), old.riskKzt()));
+            return true;
         }
 
         @Override
