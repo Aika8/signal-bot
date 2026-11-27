@@ -2456,3 +2456,17 @@ checked", and the error is logged; do not invent a quantity and do not submit a 
 Why: `adapters/src/main/java/io/github/signalbot/trigger/PriceStreamRunner.java:53-57` — the tick callback has no try/catch, unlike `SnapshotGuardPoller.java:36-44`. An exception from `exitHandler.handle` (e.g. SELL submit failing) skips `afterPrice` and the evaluator for that tick and, through `AlpacaMarketDataFeed.java:89` (`forEach(onTick)`), drops the remaining ticks of the same WebSocket message. Found by AUTO-20261127-2, reviewer, 2026-11-27
 
 In the `PriceStreamRunner` tick consumer, catch and log (WARN, symbol + message, like `SnapshotGuardPoller`) a failure of the exit step so the trailing write and the evaluator still run for that tick, and the exception does not escape into the feed. Do not change `ExitGuardHandler` or the feed adapter.
+
+### AUTO-20261127-4 — Split long verdict messages in TelegramNotifier
+- status: todo
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/telegram/TelegramNotifier.java`, `adapters/src/test/java/io/github/signalbot/telegram/TelegramNotifierSplitTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.telegram.*'`
+- expect: green; a verdict whose formatted text is over 4 096 chars reaches a mocked `TelegramSender` as several `send` calls, each at most 4 096 chars, joined = the full text; a short verdict is one call; the new test failed before the fix
+- source: issue#67#1
+- added: 2026-11-27
+- priority: bug
+
+Why: `adapters/src/main/java/io/github/signalbot/telegram/TelegramNotifier.java:35`: the verdict (action, rationale, context summary) goes out in one `sender.send` with no length guard. Telegram refuses a message over 4 096 chars, so a long rationale or context loses the whole verdict and leaves only a WARN. Found by SB-039, reviewer, 2026-11-27
+
+In `TelegramNotifier.send`, split `format(verdict, contextSummary)` with `TelegramText.split` (SB-039) and send each part with its own `sender.send` call. Keep the loop in the notifier, not in `TelegramSender` (`@Retry`). Stop after a failed part, as `NightlyReviewJob.push` does.
