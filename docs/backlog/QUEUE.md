@@ -2485,3 +2485,17 @@ Why: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java:5
 
 Keep the disarm and delete before the portfolio read (SB-034 relies on it). If the delete fails, log the error and
 still send the alert and submit the SELL, as on the normal path, so a store outage does not silence a fired stop.
+
+### AUTO-20261127-6 — Use the New York date for the screener's earnings window
+- status: todo
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/screen/ScreenRunner.java`, `adapters/src/test/java/io/github/signalbot/screen/ScreenRunnerEarningsWindowTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.screen.*'`
+- expect: green; a new MockRestServiceServer test with `Clock.fixed(2026-11-28T02:00Z)` checks `queryParam("from", "2026-11-27")` on `/calendar/earnings`. Before the fix it failed because `from` was 2026-11-28.
+- source: issue#71#1
+- added: 2026-11-27
+- priority: bug
+
+Why: `adapters/src/main/java/io/github/signalbot/screen/ScreenRunner.java:107` — `nextEarnings` computes `today` with `LocalDate.now(ZoneOffset.UTC)` and ignores the injected `Clock`. After 19:00/20:00 New York time the Finnhub window starts one day late, so an earnings event dated today (NY) is missed. The bars request uses the NY date (`AlpacaBarsQuery.NEW_YORK`). Found by SB-040, reviewer, 2026-11-27.
+
+In `ScreenRunner.nextEarnings`, take today as `LocalDate.now(clock.withZone(AlpacaBarsQuery.NEW_YORK))`, using the `clock` field SB-040 added, instead of the UTC date. Add a new test file. Do not edit existing tests.
