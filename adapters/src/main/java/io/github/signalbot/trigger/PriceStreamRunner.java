@@ -51,7 +51,13 @@ public class PriceStreamRunner implements ApplicationRunner {
             return;
         }
         subscription = feed.subscribe(watchlist.symbols(), tick -> {
-            exitGuard.onPrice(tick.symbol(), tick.price()).ifPresent(exitHandler::handle);
+            try {
+                exitGuard.onPrice(tick.symbol(), tick.price()).ifPresent(exitHandler::handle);
+            } catch (Exception e) {
+                // Like SnapshotGuardPoller: a failed exit step must not skip the trailing write and the evaluator
+                // for this tick, nor escape into the feed and drop the remaining ticks of the same message.
+                LOG.warn("Exit check failed for {}: {}", tick.symbol(), e.getMessage());
+            }
             trailingWriter.afterPrice(tick.symbol());
             evaluator.onPriceTick(tick.symbol(), tick.price(), tick.ts()).ifPresent(dispatcher::dispatch);
         });

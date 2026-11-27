@@ -2470,3 +2470,18 @@ In the `PriceStreamRunner` tick consumer, catch and log (WARN, symbol + message,
 Why: `adapters/src/main/java/io/github/signalbot/telegram/TelegramNotifier.java:35`: the verdict (action, rationale, context summary) goes out in one `sender.send` with no length guard. Telegram refuses a message over 4 096 chars, so a long rationale or context loses the whole verdict and leaves only a WARN. Found by SB-039, reviewer, 2026-11-27
 
 In `TelegramNotifier.send`, split `format(verdict, contextSummary)` with `TelegramText.split` (SB-039) and send each part with its own `sender.send` call. Keep the loop in the notifier, not in `TelegramSender` (`@Retry`). Stop after a failed part, as `NightlyReviewJob.push` does.
+
+### AUTO-20261127-5 — Alert the operator when deleting the stored guard fails on a fired exit
+- status: todo
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java`, `adapters/src/test/java/io/github/signalbot/trigger/ExitGuardDeleteFailureTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.trigger.*'`
+- expect: green; the new test (a `PositionGuardStore` whose `delete` throws during `handle`) fails before the fix: no "SELL <symbol> now" alert is sent although the in-memory guard is already disarmed
+- source: issue#69#1
+- added: 2026-11-27
+- priority: bug
+
+Why: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java:51-52` — `handle` disarms the in-memory guard, then calls `guardStore.delete`; if that throws, the exception leaves `handle` before `push`, so the protective exit sends no alert and submits no SELL until a restart re-arms the stored row. Callers (`PriceStreamRunner`, `SnapshotGuardPoller`) only log a WARN. Found by AUTO-20261127-3, reviewer, 2026-11-27
+
+Keep the disarm and delete before the portfolio read (SB-034 relies on it). If the delete fails, log the error and
+still send the alert and submit the SELL, as on the normal path, so a store outage does not silence a fired stop.
