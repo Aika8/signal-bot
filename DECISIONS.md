@@ -503,3 +503,8 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   earlier ones would read as a whole review. Not taken: a loop inside `TelegramSender` (the task forbids it);
   counting Unicode code points (Telegram's limit is closer to UTF-16 length, and the smaller count is the safe
   side); continuing after a failed part. Undo: `TelegramText.cut` and `NightlyReviewJob.push`.
+- **SB-037** — Which context ATR does the BUY gate take as "the ATR Claude saw"? Choice: only a positive
+  `ctx.atr()`; a null (not available) or a zero/negative one falls back to fetching the bars as before, so the
+  rejection reasons ("no ATR: …", "no usable stop") stay exactly as today. Not taken: trusting any non-null
+  `ctx.atr()` (a non-positive one would be rejected with a misleading "not enough daily bars"; `ContextAssembler`
+  never produces one anyway).
