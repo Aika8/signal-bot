@@ -2442,3 +2442,17 @@ Why: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java:5
 Keep the delete first (SB-034 relies on it so an exit does not fire twice). Wrap the portfolio read so that on a
 failure the operator still gets the "SELL <symbol> now — <type> hit at <price>" alert, marked as "position not
 checked", and the error is logged; do not invent a quantity and do not submit a SELL without one.
+
+### AUTO-20261127-3 — Isolate each price tick's exit/trailing/evaluator steps from one another's failures
+- status: todo
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/trigger/PriceStreamRunner.java`, `adapters/src/test/java/io/github/signalbot/trigger/PriceStreamTickFailureTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.trigger.*'`
+- expect: green; the new test (an `ExitGuardHandler` or `ExecutionService` that throws on a fired exit) fails before the fix: `trailingWriter.afterPrice` and the evaluator are not called for that tick and the exception escapes the callback
+- source: issue#64#1
+- added: 2026-11-27
+- priority: bug
+
+Why: `adapters/src/main/java/io/github/signalbot/trigger/PriceStreamRunner.java:53-57` — the tick callback has no try/catch, unlike `SnapshotGuardPoller.java:36-44`. An exception from `exitHandler.handle` (e.g. SELL submit failing) skips `afterPrice` and the evaluator for that tick and, through `AlpacaMarketDataFeed.java:89` (`forEach(onTick)`), drops the remaining ticks of the same WebSocket message. Found by AUTO-20261127-2, reviewer, 2026-11-27
+
+In the `PriceStreamRunner` tick consumer, catch and log (WARN, symbol + message, like `SnapshotGuardPoller`) a failure of the exit step so the trailing write and the evaluator still run for that tick, and the exception does not escape into the feed. Do not change `ExitGuardHandler` or the feed adapter.
