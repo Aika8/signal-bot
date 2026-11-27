@@ -2426,3 +2426,19 @@ Why: `adapters/src/main/java/io/github/signalbot/persistence/PositionGuardStore.
 
 Add `@Deprecated` and a Javadoc line "unused since SB-013; `findAllGuards` replaces it" to `findAll()` and `GuardRow`.
 Do not delete them (deleting a public method is harder to undo). Write the reflection test first and see it fail.
+
+### AUTO-20261127-2 — Keep the exit alert when reading the portfolio or submitting the SELL fails
+- status: todo
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java`, `adapters/src/test/java/io/github/signalbot/trigger/ExitHandlerFailureTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.trigger.*'`
+- expect: green; the new test (a `PortfolioReader` that throws during `handle`) fails before the fix: no alert is sent and the guard is already gone
+- source: docs/backlog/tech-debt/2026-11-27-SB-034-2.md#1
+- added: 2026-11-27
+- priority: bug
+
+Why: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java:51-59` — `handle` disarms and deletes the guard first, then calls `PortfolioReader.read()`; if that throws (D-001: a failed source throws), the exception leaves `handle` before `push`, so the protective exit is lost with no alert and no SELL, and nothing re-arms it. Found by SB-034, executor, 2026-11-27
+
+Keep the delete first (SB-034 relies on it so an exit does not fire twice). Wrap the portfolio read so that on a
+failure the operator still gets the "SELL <symbol> now — <type> hit at <price>" alert, marked as "position not
+checked", and the error is logged; do not invent a quantity and do not submit a SELL without one.
