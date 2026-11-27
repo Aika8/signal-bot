@@ -182,7 +182,10 @@ public class LiveDecisionHandler {
         executionService.submit(verdict, ExecutionSource.VERDICT, refPrice(verdict, ctx));
     }
 
-    /** ATR -> stop -> size -> count limits -> submit with the sizing facts (D-002, D-003). */
+    /**
+     * ATR -> stop -> size -> count limits -> submit with the sizing facts (D-002, D-003). The ATR is the context's
+     * (the one Claude saw) when it carries a positive one; otherwise the daily bars are fetched as the fallback.
+     */
     private void handleBuy(String symbol, Verdict verdict, DecisionContext ctx, Instant now) {
         BigDecimal entry = refPrice(verdict, ctx);
         if (entry.signum() <= 0) {
@@ -194,19 +197,24 @@ public class LiveDecisionHandler {
             reject(verdict, blackout.get());
             return;
         }
-        PriceHistory history = priceHistory == null ? null : priceHistory.getIfAvailable();
-        if (history == null) {
-            reject(verdict, "no ATR: no price history configured");
-            return;
-        }
         Optional<BigDecimal> atr;
-        try {
-            List<DailyBar> bars = history.dailyBars(symbol, ATR_BARS);
-            atr = Atr.wilder(bars, ATR_PERIOD);
-        } catch (SourceFailureException e) {
-            LOG.warn("Price history failed for {}: {}", symbol, e.getMessage());
-            reject(verdict, "no ATR: price history failed (" + e.getMessage() + ")");
-            return;
+        if (ctx.atr() != null && ctx.atr().signum() > 0) {
+            // The ATR Claude saw in the prompt (same rule and bars as below, SB-011): one fetch, one ATR (#26).
+            atr = Optional.of(ctx.atr());
+        } else {
+            PriceHistory history = priceHistory == null ? null : priceHistory.getIfAvailable();
+            if (history == null) {
+                reject(verdict, "no ATR: no price history configured");
+                return;
+            }
+            try {
+                List<DailyBar> bars = history.dailyBars(symbol, ATR_BARS);
+                atr = Atr.wilder(bars, ATR_PERIOD);
+            } catch (SourceFailureException e) {
+                LOG.warn("Price history failed for {}: {}", symbol, e.getMessage());
+                reject(verdict, "no ATR: price history failed (" + e.getMessage() + ")");
+                return;
+            }
         }
         Optional<StopDecision> stopDecision = StopPolicy.forBuy(entry, verdict.stop(), atr);
         if (stopDecision.isEmpty()) {
