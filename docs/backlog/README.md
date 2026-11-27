@@ -47,7 +47,7 @@ scheduled task is one line — the file holds the rest, so changing a prompt is 
 | Run | Prompt file | When (UTC; Almaty = UTC+5) | Writes |
 |---|---|---|---|
 | Executor | `prompts/executor.md` | hourly at :17 | branch `claude/<task id>`, a PR |
-| Reviewer | `prompts/reviewer.md` | hourly at :47 | a review comment and a label on one PR |
+| Reviewer | `prompts/reviewer.md` | hourly at :47 | one stage (task, then deep) of review on one PR |
 | Intake | `.github/workflows/intake.yml` (code) | after each automerge sweep that merged, on a `tech-debt` issue, every 3 hours | commit to `main`: QUEUE.md, intake-log.md; closes `tech-debt` issues that became tasks |
 | Automerge | `.github/workflows/automerge.yml` (code) | after every CI run and hourly at :41 | merges |
 
@@ -69,15 +69,18 @@ A run that has nothing to do stops in its first minute (`backlog.py plan` / `rev
    `verify` and `./gradlew build`, checks paths with `backlog.py check-paths`, pushes, opens the PR with `gh api`
    (REST; `gh pr` uses GraphQL, which the cloud proxy refuses) and labels it `agent`.
 3. CI runs `./gradlew build` with Docker and the backlog tests.
-4. Reviewer (another run, no shared context): when CI is green, answers yes/no questions about the diff against
-   the task. Pass → label `review:pass`. Fail → label `needs-fix` and the questions.
+4. Reviewer (another run, no shared context): when CI is green, reviews one of two independent stages — `dim=task`
+   (does the change do the task, keep conventions, pin behaviour with tests) then `dim=deep` (a cold adversarial
+   pass for runtime breakage), each by a different run. Task stage pass → label `review:task`; the deep stage that
+   follows → label `review:pass`. Any fail → label `needs-fix` and the questions.
 5. Executor of a later hour answers `needs-fix` or a red CI: at most 2 fix rounds, then the PR gets `parked` and
-   waits for Aika. A pushed fix removes `review:pass` (automerge.yml), so the reviewer looks again.
+   waits for Aika. A pushed fix removes `review:task` and `review:pass` (automerge.yml), so both stages run again.
 6. Automerge: PAUSE absent, branch and paths allowed, CI green on the head, branch up to date, and for a task:
-   `review:pass` plus a reviewer marker `verdict=pass sha=<that very head>` → squash merge, then CI on `main`.
+   `review:pass` plus reviewer markers `dim=task verdict=pass` and `dim=deep verdict=pass`, both on `sha=<that very
+   head>` → squash merge, then CI on `main`.
    A task is *done* when its PR is merged.
 
-Labels: `agent`, `review:pass`, `needs-fix`, `needs-rebase`, `parked` (waits for Aika), `blocked-paths` (touched
+Labels: `agent`, `review:task` (task stage passed), `review:pass` (both stages passed), `needs-fix`, `needs-rebase`, `parked` (waits for Aika), `blocked-paths` (touched
 a forbidden path; waits for Aika), `hold` (Aika's: do not touch).
 
 ## Rule for every run: do not wait for Aika
