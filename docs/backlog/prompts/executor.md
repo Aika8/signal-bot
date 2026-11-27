@@ -75,7 +75,8 @@ after green CI and the independent review.
 5. Findings, classified (see `docs/backlog/TECH-DEBT.md`): a regression inside your own change → fix it here; the
    task itself is wrong or contradicts `DECISIONS.md` or the code → park it with the reason; anything outside the
    task's scope → add a file `docs/backlog/tech-debt/<date>-<id>-<n>.md` in this PR (n = the next number not yet
-   used on main or the branch) and do **not** fix it.
+   used on main or the branch), in the format of `docs/backlog/TECH-DEBT.md` (`kind: bug` for wrong behaviour — the
+   intake then queues it first), and do **not** fix it.
    Never write a test that checks the wording of documentation (Markdown prose, README text): it turns CI red for
    every harmless edit. Tests check behaviour, data and code.
 5a. A question the files do not answer: follow "do not wait for Aika" in `docs/backlog/README.md` — cheap to undo →

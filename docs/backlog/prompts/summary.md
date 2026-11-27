@@ -76,7 +76,7 @@ proposal was lost — decide it again):
 - #n <branch>: <why>
 
 ## Numbers
-Queue: <done>/<total>, ready <n>. Proposals: <in>/<out> (intake). CI on main: <green/red>.
+Queue: <done>/<total>, ready <n>, bugs first <n>. Proposals and tech debt: <in>/<out> (intake). CI on main: <green/red>.
 ```
 
 Language: Russian (the headings above may be translated). At most ~60 lines. No praise, no filler, no guesses: if a number could not be obtained, write "unknown" and why.

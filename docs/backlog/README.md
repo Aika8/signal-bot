@@ -48,7 +48,7 @@ scheduled task is one line — the file holds the rest, so changing a prompt is 
 |---|---|---|---|
 | Executor | `prompts/executor.md` | hourly at :17 | branch `claude/<task id>`, a PR |
 | Reviewer | `prompts/reviewer.md` | hourly at :47 | a review comment and a label on one PR |
-| Intake | `.github/workflows/intake.yml` (code) | every 3 hours at :50 | commit to `main`: QUEUE.md, intake-log.md |
+| Intake | `.github/workflows/intake.yml` (code) | after each automerge sweep that merged, on a `tech-debt` issue, every 3 hours | commit to `main`: QUEUE.md, intake-log.md; closes `tech-debt` issues that became tasks |
 | Automerge | `.github/workflows/automerge.yml` (code) | after every CI run and hourly at :41 | merges |
 
 No analyst or user run is set up for signal-bot; the daily summary run (`prompts/summary.md`) also decides parked
