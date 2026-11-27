@@ -1940,3 +1940,21 @@ Tech debt `2026-11-26-SB-013-1.md`. The lab's backtest (SB-513) can then reuse t
 
 Issue #24. Decision (without Aika): deprecate, do not delete (deleting a public constant is harder to undo). Undo:
 remove the annotation.
+
+## Added by intake
+
+Appended by `scripts/backlog/backlog.py intake` (signal-bot: no daily cap).
+
+### AUTO-20261127-1 — Mark the unused PositionGuardStore.findAll and GuardRow as deprecated
+- status: todo
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/persistence/PositionGuardStore.java`, `adapters/src/test/java/io/github/signalbot/persistence/PositionGuardStoreDeprecationTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.persistence.PositionGuardStoreDeprecationTest'`
+- expect: green; the new test checks by reflection that `PositionGuardStore.findAll()` and the record `PositionGuardStore.GuardRow` carry `@Deprecated` (it fails before the change); nothing else in the class changes
+- source: issue#49#1
+- added: 2026-11-27
+
+Why: `adapters/src/main/java/io/github/signalbot/persistence/PositionGuardStore.java:16,53` — since SB-013 `GuardLoader` reads `findAllGuards`, and no code calls `findAll` or builds `GuardRow` any more; found by SB-013, executor, 2026-11-26 (tech-debt file `2026-11-26-SB-013-2.md`)
+
+Add `@Deprecated` and a Javadoc line "unused since SB-013; `findAllGuards` replaces it" to `findAll()` and `GuardRow`.
+Do not delete them (deleting a public method is harder to undo). Write the reflection test first and see it fail.
