@@ -7,6 +7,10 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class DecisionStore {
 
+    /** Width of {@code decisions.trigger_reason} (V1: {@code VARCHAR(64)}, counted in characters = code points). */
+    static final int TRIGGER_REASON_MAX = 64;
+    private static final String ELLIPSIS = "\u2026";
+
     private final JdbcClient db;
 
     public DecisionStore(JdbcClient db) {
@@ -22,12 +26,24 @@ public class DecisionStore {
                                 :action, :confidence, :whatChanged)
                         """)
                 .param("symbol", symbol)
-                .param("trigger", triggerReason)
+                .param("trigger", fitTriggerReason(triggerReason))
                 .param("request", requestJson)
                 .param("response", responseJson)
                 .param("action", action)
                 .param("confidence", confidence)
                 .param("whatChanged", whatChanged)
                 .update();
+    }
+
+    /**
+     * Cuts a reason longer than the column to {@value #TRIGGER_REASON_MAX} code points, the last one {@code …},
+     * so a long news headline does not fail the INSERT. Cutting by code point never splits a surrogate pair.
+     */
+    static String fitTriggerReason(String reason) {
+        if (reason == null || reason.codePointCount(0, reason.length()) <= TRIGGER_REASON_MAX) {
+            return reason;
+        }
+        int end = reason.offsetByCodePoints(0, TRIGGER_REASON_MAX - 1);
+        return reason.substring(0, end) + ELLIPSIS;
     }
 }
