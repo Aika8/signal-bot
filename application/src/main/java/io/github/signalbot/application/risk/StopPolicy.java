@@ -27,8 +27,10 @@ public final class StopPolicy {
      * @param entry      the entry price
      * @param claudeStop Claude's stop, or {@code null} when it gave none
      * @param atr        ATR(14) of the instrument; empty when there is none
-     * @return the decision, or empty when there is no usable ATR (empty, zero or negative) — the caller rejects the
-     *         BUY with "no ATR" (D-002, no silent fallback)
+     * @return the decision, or empty when there is no usable stop: either no usable ATR (empty, zero or negative) —
+     *         the caller rejects the BUY with "no ATR" (D-002, no silent fallback) — or the ATR stop
+     *         {@code entry − K × ATR} is at or below zero (D-007) — the caller rejects the BUY with "no usable stop".
+     *         A Claude stop at or below zero is never accepted; it is replaced like any unusable stop (D-007).
      */
     public static Optional<StopDecision> forBuy(BigDecimal entry, BigDecimal claudeStop, Optional<BigDecimal> atr) {
         Objects.requireNonNull(entry, "entry");
@@ -37,10 +39,13 @@ public final class StopPolicy {
             return Optional.empty();
         }
         BigDecimal atrValue = atr.get();
-        if (claudeStop != null && withinBand(entry.subtract(claudeStop), atrValue)) {
+        if (claudeStop != null && claudeStop.signum() > 0 && withinBand(entry.subtract(claudeStop), atrValue)) {
             return Optional.of(new StopDecision(claudeStop, StopSource.CLAUDE, claudeStop, atrValue));
         }
         BigDecimal atrStop = entry.subtract(K.multiply(atrValue));
+        if (atrStop.signum() <= 0) {
+            return Optional.empty();
+        }
         return Optional.of(new StopDecision(atrStop, StopSource.ATR, claudeStop, atrValue));
     }
 
