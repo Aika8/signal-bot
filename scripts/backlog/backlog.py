@@ -214,6 +214,13 @@ class Task:
         return re.findall(r"`([^`]+)`", self.fields.get("rewrites", ""))
 
     @property
+    def replaces(self) -> str:
+        """signal-bot: the parked task whose question this task carries out (set by intake from a summary proposal);
+        when this task is done, the replaced one counts as done, so its dependents are unblocked."""
+        m = re.match(r"^([A-Z]+-[\w-]+)$", self.fields.get("replaces", "").strip())
+        return m.group(1) if m else ""
+
+    @property
     def branch(self) -> str:
         return "claude/" + self.id.lower()
 
@@ -275,6 +282,8 @@ def lint(tasks: list[Task]) -> list[str]:
         for d in t.depends:
             if d not in ids:
                 errors.append(f"{where}: depends on unknown {d}")
+        if t.fields.get("replaces") and t.replaces not in ids:
+            errors.append(f"{where}: replaces unknown {t.fields.get('replaces')}")
         if len(t.description) > MAX_DESCRIPTION_CHARS:
             errors.append(f"{where}: description {len(t.description)} chars > {MAX_DESCRIPTION_CHARS}")
         if not t.description.strip():
@@ -386,6 +395,9 @@ def task_states(tasks: list[Task], state: dict) -> dict[str, str]:
             out[t.id] = "open"  # a run started it (pushed the branch) and has not opened its PR yet
         else:
             out[t.id] = "pending"
+    for t in tasks:  # signal-bot: a done task that replaces a parked one closes it
+        if out[t.id] == "done" and t.replaces and out.get(t.replaces) in ("parked", "pending", "open"):
+            out[t.replaces] = "done"
     for t in tasks:
         if out[t.id] == "pending":
             out[t.id] = "ready" if all(out.get(d) == "done" for d in t.depends) else "blocked"
@@ -480,12 +492,12 @@ def check_paths(branch: str, changes: list[Change], tasks: list[Task], root: Pat
         elif kind == "summary":
             day = branch.rsplit("-", 3)[-3:]
             want = f"docs/backlog/summaries/{'-'.join(day)}.md"
-            # signal-bot ("nothing waits for Aika"): the summary also decides parked questions — a DECISIONS.md
-            # bullet and a new proposals file that intake turns into the task doing the chosen option.
-            decided = (c.path == "DECISIONS.md" and c.status == "modified") or (
-                c.status == "added" and re.match(r"^docs/backlog/proposals/\d{4}-\d{2}-\d{2}-summary\.md$", c.path))
+            # signal-bot ("nothing waits for Aika"): the summary also decides parked questions, as a new proposals
+            # file that intake turns into the task doing the chosen option (that task, reviewed, writes DECISIONS.md).
+            decided = c.status == "added" and re.match(
+                r"^docs/backlog/proposals/\d{4}-\d{2}-\d{2}-summary\.md$", c.path)
             if c.path != want and not decided:
-                problems.append(f"{c.path}: a summary PR changes only {want}, DECISIONS.md and a new "
+                problems.append(f"{c.path}: a summary PR changes only {want} and adds "
                                 f"docs/backlog/proposals/<date>-summary.md")
     return sorted(set(problems))
 
@@ -555,6 +567,8 @@ def proposal_problems(p: Task, existing: list[Task]) -> list[str]:
     for n in p.needs:
         if n not in TOOLS:
             probs.append(f"needs '{n}' unknown")
+    if p.fields.get("replaces") and not any(t.id == p.replaces for t in existing):
+        probs.append(f"replaces unknown {p.fields.get('replaces')}")
     if not p.paths:
         probs.append("no paths in backticks")
     if len(p.description) > MAX_DESCRIPTION_CHARS or not p.description.strip():
@@ -582,7 +596,7 @@ def intake(day: str, root: Path = ROOT) -> tuple[list[str], list[str]]:
             new_id = f"AUTO-{day.replace('-', '')}-{already_today + len(accepted) + 1}"
             fields = {"status": "todo", "size": "S", "paths": p.fields["paths"],
                       "verify": p.fields["verify"], "expect": p.fields["expect"], "source": src, "added": day}
-            for extra in ("depends", "needs"):
+            for extra in ("depends", "needs", "replaces"):
                 if p.fields.get(extra):
                     fields[extra] = p.fields[extra]
             t = Task(new_id, p.title, fields,

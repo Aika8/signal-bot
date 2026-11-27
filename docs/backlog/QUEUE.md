@@ -51,10 +51,10 @@ Where the fix is a choice, the task names it; it was decided without Aika (DECIS
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/risk/StopPolicy.java`, `application/src/test/java/io/github/signalbot/application/risk/StopPolicyNonPositiveTest.java`, `adapters/src/main/java/io/github/signalbot/trigger/LiveDecisionHandler.java`, `adapters/src/test/java/io/github/signalbot/trigger/LiveDecisionNonPositiveStopTest.java`
 - verify: `./gradlew build`
-- expect: green; entry 3, ATR 2, no Claude stop → `forBuy` is empty (today: a stop of −1 with source ATR); Claude's stop ≤ 0 inside the band → empty; entry 10, ATR 2 → stop 6 as before; in the live path such a BUY is REJECTED "no usable stop: the ATR stop would be at or below zero" and never submitted; every existing test passes unchanged
+- expect: green; entry 3, ATR 2, no Claude stop → `forBuy` is empty (today: a stop of −1 with source ATR); entry 3, ATR 1.2, Claude's stop 0 (inside the band) → replaced by the ATR stop 0.6 (a Claude stop ≤ 0 is unusable, D-002); entry 3, ATR 2, Claude's stop 0 → empty (no usable stop at all); entry 10, ATR 2 → stop 6 as before; in the live path an empty result with an ATR present is REJECTED "no usable stop: the stop would be at or below zero" and never submitted; every existing test passes unchanged
 
-Issue #16. Decision: a stop ≤ 0 is no stop, so the BUY is rejected (D-002: a BUY is never executed without a
-stop). Not taken: clamp the stop to a small positive price (a fake 1R). Undo: remove the guard in `forBuy`.
+Issue #16, decision D-007 (read it). A Claude stop ≤ 0 counts as unusable (replaced, as D-002 replaces any unusable
+stop); an ATR stop ≤ 0 means there is no usable stop and `forBuy` is empty. Undo: remove the two guards in `forBuy`.
 `forBuy`'s Javadoc says when it is empty. In `LiveDecisionHandler`, the empty result today always says "no ATR";
 give the reason by checking whether the ATR was present (the ATR is computed just before `forBuy`).
 
@@ -63,7 +63,7 @@ give the reason by checking whether the ATR was present (the ATR is computed jus
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/trigger/ExitGuard.java`, `application/src/test/java/io/github/signalbot/application/trigger/ExitGuardConcurrencyTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.trigger.*'`
-- expect: green; the new test (1) checks by reflection that every public method of `ExitGuard` that changes `armed` (`arm`, `armTrailing`, `restore`, `disarm`, `onPrice`) is `synchronized` (fails today: only `onPrice` is), and (2) a stress test: while one thread sends prices that activate and move `best`, another re-arms the symbol 10 000 times; after the last `armTrailing` and with no price after it, `state(symbol)` is "not activated, no best" every time
+- expect: green; the new test checks by reflection that every public method of `ExitGuard` that changes `armed` (`arm`, `armTrailing`, `restore`, `disarm`, `onPrice`) is `synchronized` (fails today: only `onPrice` is); no timing-based stress test (it could not fail reliably before the fix)
 
 Issue #28. `onPrice` reads `armed.get`, computes, then `armed.put`; an `arm…`/`disarm` between them is overwritten
 by the old symbol's state. Make the mutating methods `synchronized` on the same monitor as `onPrice` (smallest
@@ -74,7 +74,8 @@ unchanged.
 - status: todo
 - depends: SB-032
 - size: S
-- paths: `application/src/main/java/io/github/signalbot/application/trigger/ExitGuard.java`, `application/src/main/java/io/github/signalbot/application/trigger/TrailingSnapshot.java`, `adapters/src/main/java/io/github/signalbot/trigger/TrailingStateWriter.java`, `adapters/src/main/java/io/github/signalbot/persistence/PositionGuardStore.java`, `adapters/src/test/java/io/github/signalbot/trigger/TrailingStaleWriteTest.java`, `adapters/src/test/java/io/github/signalbot/persistence/TrailingStaleWriteIntegrationTest.java`
+- paths: `application/src/main/java/io/github/signalbot/application/trigger/ExitGuard.java`, `application/src/main/java/io/github/signalbot/application/trigger/TrailingSnapshot.java`, `adapters/src/main/java/io/github/signalbot/trigger/TrailingStateWriter.java`, `adapters/src/main/java/io/github/signalbot/persistence/PositionGuardStore.java`, `adapters/src/test/java/io/github/signalbot/trigger/TrailingStaleWriteTest.java`, `adapters/src/test/java/io/github/signalbot/persistence/TrailingStaleWriteIntegrationTest.java`, `adapters/src/test/java/io/github/signalbot/trigger/TrailingRestartTest.java`
+- rewrites: `adapters/src/test/java/io/github/signalbot/trigger/TrailingRestartTest.java`
 - verify: `./gradlew build`
 - expect: green; the writer saves best/activated together with the trailing levels they belong to, and the store's UPDATE matches only a row with those levels: in CI (Docker) a row re-armed with new levels and reset by a fill is not overwritten by a write carrying the old levels (0 rows updated, logged at INFO); the unit test shows the writer passes the levels it read in the same snapshot; existing tests unchanged
 
@@ -82,9 +83,11 @@ Issue #30: the writer reads the old position's activated state, the fill resets 
 writes the old state. Fix without a shared lock across classes: `ExitGuard.snapshot(symbol)` returns
 `Optional<TrailingSnapshot>` (levels + best + activated, read in one synchronized call); a **new**
 `PositionGuardStore.saveTrailingState(symbol, TrailingSnapshot)` updates `WHERE sec_code = :s AND tp_activation =
-:activation AND trail_offset = :offset` and returns whether a row changed. The old `saveTrailingState(symbol,
-TrailingState)` stays (tests use it; mark it `@Deprecated`). Container setup as in
-`PositionGuardTrailingIntegrationTest`.
+:activation AND trail_offset = :offset` and returns whether a row changed. The old
+`saveTrailingState(symbol, TrailingState)` stays (mark it `@Deprecated`). Container setup as in
+`PositionGuardTrailingIntegrationTest`. `rewrites` (DECISIONS.md, "Tech-debt bugs of 2026-11-27"):
+`TrailingRestartTest`'s `InMemoryGuardStore` overrides only the old `saveTrailingState`; add the matching override
+of the new method there (recording into the same `stateWrites`) — nothing else in that file changes.
 
 ### SB-034 — After an exit fired, a restart does not fire it again (#31)
 - status: todo
@@ -99,23 +102,20 @@ issue does not reproduce: change no production file, say so in the report with t
 remaining gap (a crash between `onPrice` and `handle`) as one tech-debt file. If it fails, fix it in
 `ExitGuardHandler`/`GuardLoader` (the paths allow it) and say how.
 
-### SB-035 — An unconfirmed protective exit leaves the stop armed
+### SB-035 — The nightly review lists held positions without a stop
 - status: todo
-- depends: SB-034
+- depends: SB-034, SB-039
 - size: S
-- paths: `adapters/src/main/java/io/github/signalbot/execution/ExecutionService.java`, `adapters/src/main/java/io/github/signalbot/persistence/ExecutionStore.java`, `adapters/src/test/java/io/github/signalbot/execution/ExitSkippedRearmTest.java`
-- verify: `./gradlew build`
-- expect: green; when an EXIT SELL execution becomes SKIPPED or EXPIRED and the position is still held, the in-memory guard is armed again with the **stop only** (the stop of the BUY execution that opened it) and the guard row is written with that stop; a SKIPPED VERDICT SELL changes nothing; existing tests (incl. the Mockito ones of `ExecutionServiceTest`) unchanged
+- paths: `adapters/src/main/java/io/github/signalbot/review/NightlyReviewJob.java`, `adapters/src/test/java/io/github/signalbot/review/NightlyReviewUnguardedTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.review.*'`
+- expect: green; with a held position that has no stored guard (e.g. its exit SELL was Skipped), the review gains a line `Held without a stop: XYZ (qty 10)`; with every held position guarded the line is `Held without a stop: none`; `NightlyReviewExpectancyTest` passes unchanged
 
-Found while checking #31: `ExitGuardHandler` disarms and deletes the guard as soon as an exit fires; if the operator
-then presses Skipped (or the prompt expires), the position has no stop at all — against D-002 ("a BUY is never held
-without a stop"). Decision (without Aika): re-arm the stop only; not taken: re-arm the trailing take-profit too (its
-best price is gone), or do nothing. Undo: remove the re-arm call. Read `skip`, `sweep`, `applyFill` and the stores
-first; re-use `guardStore.upsert(symbol, stop, null)` and `exitGuard.arm(symbol, stop, null)`, the calls a fill
-already makes. The BUY's stop comes from the latest FILLED BUY execution of the symbol: add a read method to
-`ExecutionStore` if none exists (a new method; existing ones unchanged). Whether the position is still held comes
-from the `PortfolioReader` the service can reach, or — if `ExecutionService` has none — from that BUY having no later
-FILLED SELL; say which in the PR.
+Found while checking #31: `ExitGuardHandler` disarms and deletes the guard when an exit fires, so a Skipped or
+expired exit SELL leaves the position with no stop. Re-arming it would fire again on the next tick and prompt in a
+loop, so the decision (without Aika) is to make it visible every night instead (DECISIONS.md, "Tech-debt bugs of
+2026-11-27"). Positions from the `PortfolioReader` the job already has, guards from `PositionGuardStore.findAllGuards`
+(a new constructor parameter: keep the current constructor delegating with no guard check — the line then reads
+`Held without a stop: not checked` — and mark the new one `@Autowired`).
 
 ### SB-036 — DailyBar refuses open or close outside [low, high] (#9)
 - status: todo
@@ -129,6 +129,7 @@ park with "contradicts: <test> builds an invalid bar".
 
 ### SB-037 — The BUY gate uses the ATR Claude saw (#26)
 - status: todo
+- depends: SB-031
 - size: S
 - paths: `adapters/src/main/java/io/github/signalbot/trigger/LiveDecisionHandler.java`, `adapters/src/test/java/io/github/signalbot/trigger/LiveDecisionContextAtrTest.java`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.trigger.*'`
@@ -149,13 +150,13 @@ Issue #22, D-002: the prompt always shows the stop; when it cannot, it must say 
 ### SB-039 — Long Telegram messages are split, not lost (#37)
 - status: todo
 - size: S
-- paths: `adapters/src/main/java/io/github/signalbot/telegram/TelegramSender.java`, `adapters/src/test/java/io/github/signalbot/telegram/TelegramSenderSplitTest.java`
-- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.telegram.TelegramSenderSplitTest'`
-- expect: green; a 10 000-character text goes out as 3 messages of at most 4 096 characters each, cut at line breaks where there is one within the last 500 characters, in order and losing nothing (concatenated = original); a short text is one message as today; a text with a keyboard (`sendMarkup`) keeps the keyboard on the last part
+- paths: `adapters/src/main/java/io/github/signalbot/telegram/TelegramText.java`, `adapters/src/test/java/io/github/signalbot/telegram/TelegramTextTest.java`, `adapters/src/main/java/io/github/signalbot/review/NightlyReviewJob.java`, `adapters/src/test/java/io/github/signalbot/review/NightlyReviewSplitTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.telegram.*' --tests 'io.github.signalbot.review.*'`
+- expect: green; `TelegramText.split(text)` cuts a 10 000-character text into 3 parts of at most 4 096 characters, at a line break when one is within the last 500 characters, losing nothing (joined = original); a short text is one part; the nightly review sends each part with its own `sender.send` call (a mocked `TelegramSender` sees 3 calls for a long review, 1 for a short one); `NightlyReviewExpectancyTest` unchanged
 
-Issue #37: Telegram refuses messages over 4 096 characters, and the nightly review is sent as one. Split in
-`TelegramSender` (one place for every message). The test uses a mocked `AbsSender` and captures the `SendMessage`s;
-no live Telegram.
+Issue #37: Telegram refuses messages over 4 096 characters. The split rule lives in one pure place,
+`TelegramText`; the loop over parts is in the caller, **not** inside `TelegramSender`: its methods are `@Retry`, so a
+loop inside would resend part 1 when part 2 fails, and a self-call would bypass the retry proxy.
 
 ### SB-040 — The screener asks Alpaca for enough history
 - status: todo
@@ -1912,6 +1913,7 @@ Tech debt `2026-11-26-SB-002-1.md`. Change only the `alpaca` retry line.
 
 ### SB-956 — The prompt's stop band comes from StopPolicy
 - status: todo
+- depends: SB-031
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/risk/StopPolicy.java`, `application/src/test/java/io/github/signalbot/application/risk/StopPolicyDescribeTest.java`, `adapters/src/main/java/io/github/signalbot/decision/ClaudePromptBuilder.java`, `adapters/src/test/java/io/github/signalbot/decision/ClaudePromptStopBandTest.java`
 - verify: `./gradlew build`
@@ -1933,7 +1935,7 @@ Tech debt `2026-11-26-SB-013-1.md`. The lab's backtest (SB-513) can then reuse t
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/risk/RejectionReason.java`, `application/src/test/java/io/github/signalbot/application/risk/RejectionReasonUseTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.risk.RejectionReasonUseTest'`
-- expect: green; the constant carries `@Deprecated` and a Javadoc "not produced since D-003 (concentration caps the size)"; the test scans `src/main/java` of all modules and fails if any code outside `RejectionReason.java` returns `SYMBOL_CONCENTRATION`
+- expect: green; the test checks by reflection that the constant carries `@Deprecated` (fails today) and scans `src/main/java` and `../adapters/src/main/java` (paths from the `application` module), failing if any code outside `RejectionReason.java` uses `SYMBOL_CONCENTRATION`; the Javadoc says "not produced since D-003 (concentration caps the size)"
 
 Issue #24. Decision (without Aika): deprecate, do not delete (deleting a public constant is harder to undo). Undo:
 remove the annotation.
