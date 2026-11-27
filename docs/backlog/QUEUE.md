@@ -219,6 +219,464 @@ headline over 58 characters fails the INSERT; `ClaudeDecisionEngine.store` only 
 reason the journal (SB-602) reads — is lost. Cut in `DecisionStore.record` (no migration: V1 is applied). Container
 setup as in `PaperWalletIntegrationTest`.
 
+## Backtest on history and a market universe (D-010 — read it whole before any task here)
+
+Pure engine in `application/src/main/java/io/github/signalbot/application/backtest` (`A/backtest`). Plain adapter
+classes in `adapters/src/main/java/io/github/signalbot/backtest` carry **no Spring annotation** (the worker scans
+that package). The command-line pieces live in `adapters/src/main/java/io/github/signalbot/screen/backtest`: the
+worker never scans `screen.*`, the `screen` CLI does. The engine **calls** the production rules; a task that finds
+itself writing a second copy of one parks instead. Tests use hand-made or seeded synthetic bars; nothing calls Alpaca
+or SEC. Numbers in D-010 marked "starting value" are named constants with the comment "starting value, D-010/D-005"
+and are never tuned. Groundwork from other sections comes first.
+
+#### Groundwork
+
+### SB-957 — The D-004 trailing factors live in `application`
+- status: todo
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/trigger/TrailingPolicy.java`, `application/src/test/java/io/github/signalbot/application/trigger/TrailingPolicyTest.java`, `adapters/src/main/java/io/github/signalbot/execution/ExecutionService.java`
+- verify: `./gradlew build`
+- expect: green; `TrailingPolicy.forFill(fill, stop, atr)` returns activation fill + 2R, offset 1 ATR, spread 0.1 ATR (starting values, D-004/D-005, constants moved — not changed); `ExecutionService.trailingFor` delegates to it; every existing test passes unchanged
+
+Tech debt `2026-11-26-SB-013-1.md`. The backtest (BT-012) then reuses the same rule.
+
+### SB-504 — Lab: sample statistics
+- status: todo
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/lab/SampleStats.java`, `application/src/test/java/io/github/signalbot/application/lab/SampleStatsTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.SampleStatsTest'`
+- expect: green; for [1, 2, 3, 4, 5]: n 5, mean 3, sample std √2.5, t = 3 / (√2.5 / √5); fewer than 2 values or zero spread give an empty t; NaN or infinite values are refused
+
+`record SampleStats(int n, double mean, double std, OptionalDouble t)` with `static SampleStats of(double[] xs)`.
+Hand-computed values in comments.
+
+### SB-505 — Lab: bootstrap interval with a fixed seed
+- status: todo
+- depends: SB-504
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/lab/Bootstrap.java`, `application/src/test/java/io/github/signalbot/application/lab/BootstrapTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.BootstrapTest'`
+- expect: green; the same seed gives the same interval twice; a constant sample gives a zero-width interval at that value; for 200 normal draws (seeded) the 95 % interval of the mean contains the sample mean and its width is within 20 % of 2 × 1.96 × std/√n
+
+Percentile bootstrap of the mean; `resamples` and `seed` are parameters.
+
+### SB-506 — Lab: the bar for many variants
+- status: todo
+- depends: SB-504
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/lab/MultipleTesting.java`, `application/src/test/java/io/github/signalbot/application/lab/MultipleTestingTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.MultipleTestingTest'`
+- expect: green; the required two-sided |t| for α = 0.05 is 1.96 (±0.01) for 1 variant, 2.24 for 2, 2.81 for 10, 3.48 for 100 (Bonferroni on the normal approximation); the inverse normal is accurate to 1e-6 at 0.975 and 0.999
+
+Inverse normal CDF by a published rational approximation (e.g. Acklam's), named in the Javadoc. Pure.
+
+### SB-507 — Lab: holdout split and walk-forward windows
+- status: todo
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/lab/TimeSplits.java`, `application/src/test/java/io/github/signalbot/application/lab/TimeSplitsTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.TimeSplitsTest'`
+- expect: green; windows (train 250 days, test 60, step 60) over 2018-01-01…2025-12-31 never overlap test parts, every test part starts after its train part ends, the last partial window is dropped; a holdout split by date puts the date itself in the holdout
+
+Dates are calendar dates (`LocalDate`); trading days come from the data later.
+
+### SB-508 — Lab: point-in-time bars refuse the future
+- status: todo
+- depends: SB-001
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/lab/PointInTimeBars.java`, `application/src/test/java/io/github/signalbot/application/lab/PointInTimeBarsTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.PointInTimeBarsTest'`
+- expect: green; `view(asOf).bars()` returns an unmodifiable list of the bars up to and including `asOf`, oldest first; `view(asOf).on(date)` returns the bar of that date and throws `IllegalStateException` naming both dates when `date` is after `asOf`; bars not sorted or with duplicate dates are refused at construction
+
+Pure. `PointInTimeBars(List<DailyBar>)` for one symbol; `view(LocalDate asOf)` returns a small `BarView` with
+`bars()` and `on(LocalDate)`. The backtest's rules (BT-003) get only `view(d)`.
+
+### SB-510 — Lab: daily bars from a CSV file
+- status: todo
+- depends: SB-001
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/lab/CsvBarDataset.java`, `adapters/src/test/java/io/github/signalbot/lab/CsvBarDatasetTest.java`, `adapters/src/test/resources/lab/**`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.lab.CsvBarDatasetTest'`
+- expect: green; a synthetic CSV `symbol,date,open,high,low,close,volume` with three symbols (one stops trading half-way) loads into bars per symbol, oldest first; a bad number, a high below low or an unsorted date throws `SourceFailureException` naming the line
+
+Pure reading of a `Path` or `Reader`; no Spring bean needed. The fixture is generated by hand or by a seeded loop and
+committed; say how in its first comment line.
+
+### SB-520 — Drawdown and losing streak in R
+- status: todo
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/review/Drawdown.java`, `application/src/test/java/io/github/signalbot/application/review/DrawdownTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.review.DrawdownTest'`
+- expect: green; for R results [+1, −1, −1, +2, −1, −1, −1, +0.5] the maximum drawdown is 3R and the longest losing streak 3; no trades → 0 and 0; only winners → 0 and 0
+
+Pure, `BigDecimal`. Used later by the weekly journal (SB-605) and the lab report; one place for both.
+
+#### Rules moved to `application` first (one rule in one place)
+
+### BT-031 — The ATR window lives in `application`
+- status: todo
+- depends: SB-031, SB-037
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/risk/AtrWindow.java`, `application/src/test/java/io/github/signalbot/application/risk/AtrWindowTest.java`, `adapters/src/main/java/io/github/signalbot/trigger/LiveDecisionHandler.java`, `adapters/src/main/java/io/github/signalbot/trigger/ContextAssembler.java`
+- verify: `./gradlew build`
+- expect: green; `AtrWindow.BARS = 30` and `AtrWindow.PERIOD = 14` with `static Optional<BigDecimal> atr(List<DailyBar> barsUpToDay)` = `Atr.wilder(last 30 bars, 14)`; the test shows it ignores bars older than the last 30 (fails before: the class does not exist — break one line to prove it); `LiveDecisionHandler` and `ContextAssembler` use it instead of `LiveDecisionHandler.ATR_BARS`; every existing test passes unchanged
+
+D-010 §2: the backtest must compute the same ATR as the live path; Wilder's value depends on its window. Keep
+`LiveDecisionHandler.ATR_BARS` as a deprecated alias of `AtrWindow.BARS` if a test reads it.
+
+### BT-032 — The live BUY sizing moves to `application`
+- status: todo
+- depends: BT-031
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/risk/BuySizing.java`, `application/src/main/java/io/github/signalbot/application/risk/FeeFunction.java`, `application/src/test/java/io/github/signalbot/application/risk/BuySizingTest.java`, `adapters/src/main/java/io/github/signalbot/trigger/LiveDecisionHandler.java`
+- verify: `./gradlew build`
+- expect: green; `BuySizing.size(total, entry, stop, fxToKzt, claudeQty, heldKzt, maxSingleSymbolPct, spendableKzt, FeeFunction)` does what `LiveDecisionHandler.size` does today — concentration cap = floor((total × pct − held) / price in KZT), cash cap, a first `PositionSizer` pass without fees, one-leg fee × 2 for that quantity, a second pass — and the hand-computed test shows it; `LiveDecisionHandler` delegates to it with a `FeeFunction` built on `FeeModel`; `LiveDecisionHandlerAtrTest` and every other existing test pass unchanged
+
+D-010 §2. `interface FeeFunction { BigDecimal feeKzt(BigDecimal quantity, BigDecimal notionalKzt); }` (US venue in
+live). Read `LiveDecisionHandler.size`, `sharesFor`, `spendableKzt` first; move, do not rewrite.
+
+### BT-007 — The screener's PASS rule moves to `application`
+- status: todo
+- depends: SB-040
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/screen/ScreenRule.java`, `application/src/test/java/io/github/signalbot/application/screen/ScreenRuleTest.java`, `adapters/src/main/java/io/github/signalbot/screen/ScreenMetrics.java`
+- verify: `./gradlew build`
+- expect: green; `ScreenRule` holds `BARS = 60` (the screener's request), the ATR% over those bars (through `Atr.wilder`), the ADV in millions of shares over them and `pass(rawPrice, adv, atrPercent, maxPrice)` with the screener's constants (ADV ≥ 5 M, ATR% in [2, 4]); `ScreenMetrics`'s public methods delegate to it; `ScreenMetricsTest` passes unchanged
+
+One rule in one place (D-010 §2, §7): R3 and the screener share it. `ScreenMetrics.advMillions(List<Bar>)` keeps
+its signature and converts.
+
+#### The engine
+
+### BT-001 — Universe: which symbols could be traded on day D
+- status: todo
+- size: S
+- paths: `domain/src/main/java/io/github/signalbot/domain/port/MarketUniverse.java`, `application/src/main/java/io/github/signalbot/application/backtest/ListedUniverse.java`, `application/src/test/java/io/github/signalbot/application/backtest/ListedUniverseTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.ListedUniverseTest'`
+- expect: green; a symbol listed 2019-03-01 and delisted 2022-06-30 is a member on 2020-01-01, not on 2018-12-31 or 2023-01-01; `delistedCount(start, end)` counts symbols delisted inside the period; a delisting before the listing is refused; the result is sorted
+
+Port `MarketUniverse` (domain, no framework): `SortedSet<String> symbolsOn(LocalDate day)`; Javadoc as the other
+ports (failure → `SourceFailureException`, D-001). `ListedUniverse` (pure) implements it from
+`List<Listing(String symbol, LocalDate listed, LocalDate delisted)>` (delisted null = still listed). Replaces SB-509.
+
+### BT-034 — Price scale: raw levels from adjusted bars
+- status: todo
+- depends: SB-508
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/PriceScale.java`, `application/src/test/java/io/github/signalbot/application/backtest/PriceScaleTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.PriceScaleTest'`
+- expect: green; from a symbol's adjusted and raw bars, `scale(day)` = raw close ÷ adjusted close of that day; `raw(price, day)` and `shares(sharesAtEntry, entryDay, day)` convert across a 2-for-1 split (100 shares bought before → 200 after; raw price halves); a day missing from either series throws; scale never reads a day after the one asked
+
+D-010 §4: levels (close ≥ 5, price ≤ max) and share counts use raw prices; rules use adjusted bars.
+
+### BT-002 — Liquidity filter on past bars only
+- status: todo
+- depends: BT-034
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/LiquidityFilter.java`, `application/src/test/java/io/github/signalbot/application/backtest/LiquidityFilterTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.LiquidityFilterTest'`
+- expect: green; raw close of D 4.99 fails, 5.00 passes (an adjusted close below 5 with a raw close above passes); average dollar volume (close × volume, scale-free) of the 20 sessions **before** D at 19.99 M fails, 20 M passes; fewer than 20 sessions before D fails; a huge volume on D itself changes nothing; no bar after D is read
+
+D-010 §5 starting values (`MIN_RAW_CLOSE_USD = 5`, `MIN_ADV_USD = 20 000 000`, `ADV_SESSIONS = 20`).
+
+### BT-003 — Entry rule interface and the look-ahead check
+- status: todo
+- depends: SB-508, BT-034
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/EntryRule.java`, `application/src/main/java/io/github/signalbot/application/backtest/RuleInput.java`, `application/src/main/java/io/github/signalbot/application/backtest/Candidate.java`, `application/src/test/java/io/github/signalbot/application/backtest/LookAheadCheck.java`, `application/src/test/java/io/github/signalbot/application/backtest/LookAheadCheckTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.LookAheadCheckTest'`
+- expect: green; `LookAheadCheck.assertNoLookAhead(EntryRule rule, Map<String, List<DailyBar>> adjusted, Map<String, List<DailyBar>> raw, LocalDate day, long seed)` passes for a rule that reads only its inputs and fails, naming the symbol and date, for a test rule that keeps a reference to the full lists; it replaces every bar after `day` of every symbol with seeded random bars and compares the candidates
+
+`interface EntryRule { String id(); Map<String, String> parameters(); List<Candidate> rank(LocalDate day,
+Map<String, RuleInput> inputs); }` — `record RuleInput(BarView adjusted, BigDecimal rawClose)` built from
+`PointInTimeBars.view(day)` (SB-508) and `PriceScale`; results ordered best first, ties by symbol.
+`record Candidate(String symbol, BigDecimal score, String reason)`. `LookAheadCheck` is a test helper later tasks call.
+
+### BT-033 — Top N of a rule on a day: one class
+- status: todo
+- depends: BT-002, BT-003
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/Ranking.java`, `application/src/test/java/io/github/signalbot/application/backtest/RankingTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.RankingTest'`
+- expect: green; `Ranking.top(rule, universe members of D, adjusted and raw bars, D, n)` applies `LiquidityFilter` first, builds the `RuleInput`s, calls the rule and returns at most n candidates; a symbol failing liquidity never reaches the rule (a spy rule shows it); n ≤ 0 is refused
+
+D-010 §2: the backtest, the screener (BT-024) and the live watchlist (BT-025) all call this.
+
+### BT-004 — R0: random entry with a seed (the control)
+- status: todo
+- depends: BT-003
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/rules/RandomRule.java`, `application/src/test/java/io/github/signalbot/application/backtest/rules/RandomRuleTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.rules.RandomRuleTest'`
+- expect: green; the same seed and day give the same candidates in any call order (the random stream comes from seed and day, not from call history); two seeds differ; `LookAheadCheck` passes; no inputs give an empty list
+
+D-010 §7: the control — what exits and risk alone give. The seed is not a parameter for the variant count (D-010 §8).
+
+### BT-005 — R1: momentum breakout
+- status: todo
+- depends: BT-003
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/rules/MomentumRule.java`, `application/src/test/java/io/github/signalbot/application/backtest/rules/MomentumRuleTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.rules.MomentumRuleTest'`
+- expect: green; a close on D above the highest high of the 20 sessions before D is a candidate, equal is not; ranked by the 60-session return (hand-computed); fewer than 61 sessions → not a candidate; `LookAheadCheck` passes
+
+D-010 §7, starting values `BREAKOUT_SESSIONS = 20`, `RANK_SESSIONS = 60`; `parameters()` returns them.
+
+### BT-006 — R2: pullback in a trend
+- status: todo
+- depends: BT-003
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/rules/PullbackRule.java`, `application/src/test/java/io/github/signalbot/application/backtest/rules/PullbackRuleTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.rules.PullbackRuleTest'`
+- expect: green; a close above its 100-session simple average after three strictly lower closes in a row (closes of D−3 > D−2 > D−1 > D) is a candidate; two lower closes, or a close below the average, is not; ranked by the distance below the 5-session high in percent; `LookAheadCheck` passes
+
+D-010 §7, starting values `TREND_SESSIONS = 100`, `DOWN_CLOSES = 3`, `HIGH_SESSIONS = 5`; `parameters()` returns them.
+
+### BT-008 — R3: the screener rule as an entry rule
+- status: todo
+- depends: BT-003, BT-007
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/rules/ScreenPassRule.java`, `application/src/test/java/io/github/signalbot/application/backtest/rules/ScreenPassRuleTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.rules.ScreenPassRuleTest'`
+- expect: green; a symbol passing `ScreenRule.pass` on D (ATR% and ADV over the last `ScreenRule.BARS` adjusted bars up to D, price = the raw close of D, max price a constructor parameter) is a candidate, ranked by ATR% closest to 3 %; a failing one is not; `LookAheadCheck` passes
+
+Reuse `ScreenRule` (BT-007) for every number; this class only adapts it.
+
+### BT-009 — R4: insider purchase clusters, known on the filing date
+- status: todo
+- depends: BT-003, SB-406
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/rules/InsiderClusterRule.java`, `application/src/main/java/io/github/signalbot/application/backtest/rules/FiledTransaction.java`, `application/src/test/java/io/github/signalbot/application/backtest/rules/InsiderClusterRuleTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.rules.InsiderClusterRuleTest'`
+- expect: green; with `record FiledTransaction(LocalDate filed, InsiderTransaction tx)`: three owners' open-market buys within 10 days make the symbol a candidate on the day the third is **filed**, not on its transaction date; a filing dated after D is never seen on D; the same cluster is a candidate once; ranked by total USD; `LookAheadCheck` passes for its bar inputs
+
+Uses `InsiderBuys.openMarketPurchases` (SB-405) and `BuyCluster` (SB-406) as they are, `minInsiders = 3`,
+`windowDays = 10` (starting values). Filings are given to the constructor.
+
+### BT-010 — Fills of one bar
+- status: todo
+- depends: SB-032
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/BarFills.java`, `application/src/test/java/io/github/signalbot/application/backtest/BarFillsTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.BarFillsTest'`
+- expect: green; `BarFills.exit(guard, symbol, bar, entryBar)` feeds open, low, high, close to `ExitGuard.onPrice` (on the entry bar: only the low, and only a stop may fire — trailing signals are ignored that day) and returns the first exit as a `Fill(type, price)`: an exit at the open fills at the open; a stop inside the bar at the stop level; a trailing exit inside the bar at its level; then 10 bps adverse slippage (starting value); a hand-made bar whose low hits the stop and whose high then sets a new best gives the stop; no exit → empty
+
+D-010 §3. Reuse `ExitGuard` and its signal levels; this class only orders the prices and picks the fill price.
+
+### BT-011 — Simulation: entries, sizing and stop exits
+- status: todo
+- depends: BT-001, BT-010, BT-031, BT-032, BT-033, SB-015
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/Simulation.java`, `application/src/main/java/io/github/signalbot/application/backtest/SimulationConfig.java`, `application/src/main/java/io/github/signalbot/application/backtest/BacktestTrade.java`, `application/src/test/java/io/github/signalbot/application/backtest/SimulationTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.SimulationTest'`
+- expect: green; on a hand-made 3-symbol series with an explicit `SimulationConfig` (start equity, entries per day 1, trailing off, slippage 10 bps): the top candidate of `Ranking.top` on D enters at the open of D+1 + slippage; its stop is `StopPolicy.forBuy(entry, null, AtrWindow.atr(bars up to D))`; its shares come from `BuySizing.size` on the raw entry price and current equity (fx 1, Claude quantity absent, the `FeeFunction` of the config); it exits through `BarFills`; R comes from `RMultiple.of(net result, 1R)`; a candidate without a usable stop is skipped and counted; equity and cash add up after every day
+
+The test sets every config field explicitly, so BT-012's defaults never change what it pins. One currency (USD).
+
+### BT-012 — Simulation: trailing exits, risk limits and the earnings blackout
+- status: todo
+- depends: BT-011, SB-957
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/Simulation.java`, `application/src/main/java/io/github/signalbot/application/backtest/SimulationConfig.java`, `application/src/test/java/io/github/signalbot/application/backtest/SimulationRulesTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.*'`
+- expect: green; with trailing on, positions are armed with `TrailingPolicy.forFill` and leave through the trailing exit on a hand-made series; every entry is checked by `RiskLimitEvaluator.evaluate` with a `RiskContext` built from the simulated account (trades today counting entries and exits, open positions, daily P&L for the daily-loss stop) — not by comparing `RiskLimits` accessors; a held symbol is not entered again; with an earnings history, `EarningsBlackout.blocks` skips the entry, without one the result says "earnings blackout: not applied (no data)"; `SimulationTest` passes unchanged
+
+Defaults of `SimulationConfig` become D-010's (trailing on, entries limited by `RiskLimits.defaults()`).
+
+### BT-013 — Fees in the backtest come from `FeeModel`
+- status: todo
+- depends: BT-032
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/backtest/FeeModelFees.java`, `adapters/src/test/java/io/github/signalbot/backtest/FeeModelFeesTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.backtest.FeeModelFeesTest'`
+- expect: green; `FeeModelFees implements FeeFunction` for the backtest's USD account: it converts the USD notional to KZT with `FxConverter.rateOf(USD)`, calls `FeeModel.compute(Venue.US, qty, notionalKzt)` and converts the fee back to USD; built with `new FeeModel(new FxConverter(fxProps), paperProps)` it gives, for 100 shares at 50 USD, the hand-computed per-share + per-order fee; no Spring annotation on the class
+
+D-010 §2: fees are counted the way the paper wallet counts them; no second fee formula.
+
+### BT-014 — Backtest metrics in R
+- status: todo
+- depends: BT-011, SB-505, SB-520
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/BacktestMetrics.java`, `application/src/test/java/io/github/signalbot/application/backtest/BacktestMetricsTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.BacktestMetricsTest'`
+- expect: green; from a fixed list of trades: n, win rate, average win and loss and E come from `Expectancy`, the 95 % interval of E from `Bootstrap` (seed fixed), the maximum drawdown in R from `Drawdown`, fees as a share of the gross result; no formula written twice; no trades → n 0 and an empty interval
+
+Reuse `Expectancy` (SB-016), `Bootstrap` (SB-505), `Drawdown` (SB-520); one rule in one place.
+
+### BT-015 — Benchmarks: R0 and buy-and-hold SPY
+- status: todo
+- depends: BT-004, BT-012, BT-014
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/Benchmarks.java`, `application/src/test/java/io/github/signalbot/application/backtest/BenchmarksTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.BenchmarksTest'`
+- expect: green; R0 with seeds 1…20 on the same data and config gives its median E; buy-and-hold of a given total-return series (SPY by default) gives the total return and maximum drawdown in % from the first open to the last close of the period; both deterministic
+
+D-010 §8. SPY's total-return series comes from the store's benchmark file (BT-019, BT-021).
+
+### BT-016 — Run log: every variant counted
+- status: todo
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/RunLog.java`, `application/src/test/java/io/github/signalbot/application/backtest/RunLogTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.RunLogTest'`
+- expect: green; a run line (date, rule id, rule parameters, period, split, max price, equity, seed, n, E, status) formats to one markdown table row and parses back; `variants(lines, "R1", current)` counts distinct (rule parameters, period, split, max price, equity) including the current run, ignoring the seed, so the first run counts 1 and re-running the same variant does not raise it; a malformed line is refused with its number
+
+Replaces SB-516. D-010 §8 defines a variant.
+
+### BT-017 — Status of a rule, fixed before the first run
+- status: todo
+- depends: BT-014, BT-016, SB-504, SB-506
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/RuleStatus.java`, `application/src/test/java/io/github/signalbot/application/backtest/RuleStatusTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.RuleStatusTest'`
+- expect: green; a table of cases reproduces D-010 §8: VERIFIED needs ≥ 30 test trades, the interval's lower bound > 0, train |t| ≥ the bar for the variants (≥ 1) and E > R0's median; CANDIDATE when the train bar is met and test E > 0 but not the rest; NOISE otherwise; the thresholds are constants quoting D-010
+
+Replaces SB-515. The numbers are D-010's; this task does not choose them.
+
+### BT-018 — The report
+- status: todo
+- depends: BT-015, BT-017
+- size: S
+- paths: `application/src/main/java/io/github/signalbot/application/backtest/BacktestReport.java`, `application/src/test/java/io/github/signalbot/application/backtest/BacktestReportTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.BacktestReportTest'`
+- expect: green; the markdown of a fixed input shows rule and parameters, data range, train and test periods, start equity, the metrics of BT-014 for both periods, R0 and SPY (total return), the status with its reason, the earnings-blackout note, the variant count, and the lines "Survivorship: delisted companies are missing from the data; results are biased upwards." and "Universe: Alpaca's tradable us_equity list (ETFs included)."; the same input gives the same bytes; the test checks lines with `contains`
+
+Replaces SB-517.
+
+### BT-026 — No look-ahead anywhere in the engine
+- status: todo
+- depends: BT-004, BT-005, BT-006, BT-008, BT-009, BT-012
+- size: S
+- paths: `application/src/test/java/io/github/signalbot/application/backtest/EngineLookAheadTest.java`
+- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.backtest.EngineLookAheadTest'`
+- expect: green; for each of R0…R4 on a seeded 5-symbol series: the trades entered up to day D are the same when every bar after D (adjusted and raw) is replaced by random bars (10 replacements); `LookAheadCheck` passes for every rule on 20 random days
+
+D-010 §3. A new test file only.
+
+#### Data and the command (Aika runs them; the cloud only tests them)
+
+### BT-019 — History store on disk, outside the repository
+- status: todo
+- depends: SB-510
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/backtest/HistoryStore.java`, `adapters/src/test/java/io/github/signalbot/backtest/HistoryStoreTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.backtest.HistoryStoreTest'`
+- expect: green; with a `@TempDir`: adjusted (`<SYM>.csv`) and raw (`<SYM>.raw.csv`) bars written for a symbol read back equal; the benchmark series lives in `_benchmark/SPY.csv`; `replace(symbol, …)` rewrites a symbol whole, `append` keeps one row per date and the file sorted; `symbols()` and `lastDate(symbol)` work; the root defaults to `$SIGNALBOT_DATA_DIR` or `~/.signal-bot/history`, and a root inside a git working tree (any parent holds `.git`) is refused; no Spring annotation on the class
+
+Files in `CsvBarDataset`'s format (SB-510), read through it.
+
+### BT-020 — Alpaca's list of tradable US equities
+- status: todo
+- depends: BT-001
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/backtest/AlpacaAssetsMapper.java`, `adapters/src/test/java/io/github/signalbot/backtest/AlpacaAssetsMapperTest.java`, `adapters/src/test/resources/alpaca/**`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.backtest.AlpacaAssetsMapperTest'`
+- expect: green; a synthetic `/v2/assets?status=active&asset_class=us_equity` fixture maps to the symbols that are active, tradable and on an exchange in `EXCHANGES` (a constant: NYSE, NASDAQ, ARCA, AMEX, BATS — Javadoc "not checked against a live response"); OTC is excluded, ETFs are kept; a malformed entry throws `SourceFailureException("alpaca", …)`; no Spring annotation
+
+Pure mapper like `AlpacaSnapshotMapper`; the HTTP call is BT-021's.
+
+### BT-021 — Loader: both price series for the whole list
+- status: todo
+- depends: SB-041, SB-955, BT-019, BT-020
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/screen/backtest/HistoryLoader.java`, `adapters/src/main/java/io/github/signalbot/market/AlpacaBarsQuery.java`, `adapters/src/test/java/io/github/signalbot/screen/backtest/HistoryLoaderTest.java`, `adapters/src/test/resources/alpaca/**`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.screen.backtest.HistoryLoaderTest'`
+- expect: green; with `MockRestServiceServer`: the loader reads the assets list, then multi-symbol daily bars (`/v2/stocks/bars?symbols=…`, 100 symbols a request, `feed=sip`, no `end`, `page_token` followed until absent) twice — `adjustment=split` and `adjustment=raw` — from each symbol's last stored date (or 2016-01-01); when the re-fetched overlapping bar differs from the stored one (a new split), that symbol is fetched again whole and replaced; SPY is also fetched with `adjustment=all` into the benchmark file; a bar `DailyBar` refuses skips that symbol and is listed in the returned summary; a second run with nothing new writes nothing
+
+A `@Component` in `screen.backtest` (only the `screen` CLI context sees it), its request method with
+`@Retry(name = "alpaca")` like the other Alpaca adapters (not exercised by the test). The query parameters live in
+`AlpacaBarsQuery` (one place, D-008); add the multi-symbol form there.
+
+### BT-022 — Universe from the store
+- status: todo
+- depends: BT-001, BT-019
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/backtest/StoreUniverse.java`, `adapters/src/test/java/io/github/signalbot/backtest/StoreUniverseTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.backtest.StoreUniverseTest'`
+- expect: green; `StoreUniverse implements MarketUniverse`: on D the members are the stored symbols with a bar dated D; a symbol whose file ends before D is not one; an empty store throws `SourceFailureException` (D-001); `lastDay()` gives the newest stored date; no Spring annotation
+
+D-010 §5: the store holds what the loader fetched from today's list, so delisted companies are missing.
+
+### BT-023 — The `screen` CLI dispatches commands; `history-load`
+- status: todo
+- depends: BT-021, BT-022
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/screen/ScreenRunner.java`, `adapters/src/main/java/io/github/signalbot/screen/ScreenApplication.java`, `adapters/src/main/java/io/github/signalbot/screen/backtest/Commands.java`, `adapters/src/test/java/io/github/signalbot/screen/backtest/CommandsTest.java`
+- verify: `./gradlew build`
+- expect: green; `ScreenRunner` passes its arguments to `Commands`: no argument keeps today's screener behaviour, `history-load` runs `HistoryLoader` and prints its summary, an unknown command prints the usage and exits non-zero; `ScreenApplication` enables the properties the backtest needs (`FxProperties`, `PaperWalletProperties`, `RiskLimits` settings if any); `Commands.repoRoot()` finds the repository root by walking up from the working directory to the folder holding `settings.gradle.kts` (Gradle runs the task in `adapters/`); existing screen tests unchanged
+
+`./gradlew screen --args='history-load'` is the command (the `screen` task exists; build files are Aika's).
+
+### BT-029 — `backtest`: run, report, run log
+- status: todo
+- depends: BT-005, BT-006, BT-008, BT-012, BT-013, BT-018, BT-023, BT-026, SB-507
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/screen/backtest/Commands.java`, `adapters/src/main/java/io/github/signalbot/screen/backtest/BacktestCommand.java`, `adapters/src/test/java/io/github/signalbot/screen/backtest/BacktestCommandTest.java`, `docs/backtest/runs.md`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.screen.backtest.*'`
+- expect: green; `backtest --rule R1 [--from --to --split --seed --max-price --equity]` loads the store (adjusted, raw, SPY) and runs train and test periods (split through `TimeSplits`, SB-507), R0 with 20 seeds and SPY, prints the report and writes it to `<repo root>/docs/backtest/reports/<rule>-<from>-<to>.md`, and appends one line to `<repo root>/docs/backtest/runs.md`; the default equity is the paper seed converted at the configured FX rate; on a synthetic 50-symbol × 600-day store in a `@TempDir` two runs give byte-identical reports in under 60 seconds; an unknown rule or a missing store fails with a clear message; R4 is refused with "no EDGAR data loaded" until BT-030
+
+Create `docs/backtest/runs.md` with its table header. README (BT-027) tells Aika to set `JAVA_TOOL_OPTIONS=-Xmx8g`
+for the full universe.
+
+### BT-024 — The screener ranks the universe instead of `screen.candidates`
+- status: todo
+- depends: BT-008, BT-022, BT-023, BT-033
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/screen/**`, `adapters/src/main/resources/application.yml`, `adapters/src/test/java/io/github/signalbot/screen/ScreenUniverseTest.java`
+- verify: `./gradlew build`
+- expect: green; `./gradlew screen` (no argument) calls `Ranking.top` with R3 on the store's last day and prints the top `screen.top` (default 30) rows with the existing columns; `screen.candidates` is gone from `application.yml` and `ScreenProperties` (keep a delegating constructor if a test builds it); existing screen tests unchanged
+
+D-010 §5. The ranking is `Ranking.top` (BT-033), the same call the backtest and the watchlist make.
+
+### BT-025 — The live watchlist: held, armed and the top of a rule
+- status: todo
+- depends: BT-024
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/config/**`, `adapters/src/main/java/io/github/signalbot/trigger/WatchlistSource.java`, `adapters/src/main/java/io/github/signalbot/trigger/NewsPoller.java`, `adapters/src/main/java/io/github/signalbot/trigger/EarningsPoller.java`, `adapters/src/main/resources/application.yml`, `adapters/src/test/java/io/github/signalbot/trigger/WatchlistSourceTest.java`
+- verify: `./gradlew build`
+- expect: green; `WatchlistSource.symbols()` = held positions ∪ symbols armed in `ExitGuard` ∪ either `signalbot.watchlist.symbols` (explicit override, empty by default — the `AAPL,MSFT,…` default is gone) or the top `signalbot.watchlist.max` (default **5**, at most 30) of `Ranking.top` with rule `signalbot.watchlist.rule` (default R3) on the store's last day; held and armed come first and are never cut; a missing store, or a last day older than 5 trading days, gives held ∪ armed only, logged at ERROR and sent once a day as an operator alert (D-001); the news and earnings pollers read it; existing tests unchanged (old constructors delegate)
+
+D-010 §5. N = 5 keeps today's number of Claude calls (a paid API); raising it is Aika's. `@Size(max = 10)` on
+the override stays.
+
+### BT-036 — The price stream follows the watchlist
+- status: todo
+- depends: BT-025
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/trigger/PriceStreamRunner.java`, `adapters/src/test/java/io/github/signalbot/trigger/PriceStreamResubscribeTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.trigger.*'`
+- expect: green; with a fake `MarketDataFeed`: at start the stream subscribes to `WatchlistSource.symbols()`; once a day (cron property, default 09:00 New York) it closes the old subscription and subscribes to the new list when the list changed, and does nothing when it did not; a held symbol stays subscribed across the change; a failure to resubscribe keeps the old subscription and alerts; existing tests unchanged
+
+D-010 §5: `PriceStreamRunner` subscribes once at startup today; `MarketDataFeed.subscribe` returns an `AutoCloseable`, which is how the old subscription ends.
+
+### BT-027 — README: how Aika runs the backtest
+- status: todo
+- depends: BT-029, BT-036
+- size: S
+- paths: `README.md`
+- verify: `grep -nE 'history-load|--rule|SIGNALBOT_DATA_DIR|JAVA_TOOL_OPTIONS|Survivorship|runs.md|watchlist' README.md`
+- expect: a section "Backtest" with the two commands (`./gradlew screen --args='history-load'`, then `JAVA_TOOL_OPTIONS=-Xmx8g ./gradlew screen --args='backtest --rule R1'`), the environment keys they read (names only, never values), where the data lives, how to read the status, that delisted companies are missing, that `docs/backtest/runs.md` must be committed after each run, and how the live watchlist is now chosen (held ∪ armed ∪ top 5 of R3); "No real orders, ever" kept word for word
+
+Write from the code as merged, not from D-010 alone.
+
+### BT-028 — EDGAR client (late)
+- status: todo
+- depends: SB-403, SB-407, SB-409, SB-410, BT-019
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/screen/backtest/EdgarClient.java`, `adapters/src/test/java/io/github/signalbot/screen/backtest/EdgarClientTest.java`, `adapters/src/test/resources/edgar/**`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.screen.backtest.EdgarClientTest'`
+- expect: green; with `MockRestServiceServer` and the synthetic EDGAR fixtures: every request carries the User-Agent from `SIGNALBOT_EDGAR_USER_AGENT`, and the client refuses to start without it (the message names the variable; there is no default); requests are at least 100 ms apart; it reads the daily index of each day of a range, downloads the Form 4 documents it lists into `<data dir>/edgar/` and skips the ones already there; no name or address appears in code, tests or fixtures
+
+D-010 §7. SEC asks for ≤ 10 requests a second and a contact User-Agent; the value is Aika's, only in her environment.
+
+### BT-030 — `history-load --edgar` and R4 in the command
+- status: todo
+- depends: BT-009, BT-028, BT-029
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/screen/backtest/Commands.java`, `adapters/src/main/java/io/github/signalbot/screen/backtest/BacktestCommand.java`, `adapters/src/main/java/io/github/signalbot/screen/backtest/FilingsStore.java`, `adapters/src/test/java/io/github/signalbot/screen/backtest/FilingsStoreTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.screen.backtest.*'`
+- expect: green; `history-load --edgar --from … --to …` runs `EdgarClient`; `FilingsStore` reads the stored Form 4 files through `Form4Parser` into `FiledTransaction`s (filing date from the index); `backtest --rule R4` then runs with them; with no stored filings R4 is still refused with "no EDGAR data loaded"; `BacktestCommandTest` passes unchanged
+
+D-010 §7. Reuse `Form4Parser` (SB-402/403) and `FormIndexParser` (SB-407); no second parser.
+
 ## ATR plan (DECISIONS.md D-002, D-003, D-004; Aika approved all seven steps)
 
 ### SB-001 — Domain: daily bars and the PriceHistory port
@@ -1279,7 +1737,7 @@ purchase, S = sale, A = grant, M = option exercise, F = tax withholding, G = gif
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.insider.BuyClusterTest'`
 - expect: green; with `minInsiders` 3 and `windowDays` 10 (parameters of the call, no defaults in code) three different owners buying within 10 days form a cluster, the same owner three times does not, a fourth buyer on day 12 starts a new window; the cluster reports owners, total USD and first/last dates
 
-Pure. The parameters belong to a lab hypothesis (SB-503), not to the code: no default values, no constants.
+Pure. The parameters belong to the rule that uses it (R4, BT-009, D-010), not to this class: no default values, no constants.
 
 ### SB-407 — EDGAR daily index (`form.idx`)
 - status: todo
@@ -1347,211 +1805,167 @@ needs build files (Aika's), so everything lives in `application/src/main/java/io
 not money).
 
 ### SB-501 — Lab: hypothesis and evidence label
-- status: todo
+- status: dropped
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/Hypothesis.java`, `application/src/main/java/io/github/signalbot/application/lab/EvidenceLabel.java`, `application/src/test/java/io/github/signalbot/application/lab/HypothesisTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.HypothesisTest'`
 - expect: green; a hypothesis with a holdout start outside its period, a negative variants count, a blank rule or an id not matching `H-\d{3}` is refused
+
+Superseded by D-010 (BT-017); kept for the record, not to be done.
 
 `enum EvidenceLabel { VERIFIED_WORKS, VERIFIED_NO_EDGE, CANDIDATE, RANGE_NOT_DIRECTION, REFERENCE, DISCIPLINE_RULE }`
 with a short human text each. `record Hypothesis(String id, String title, String rule, String data, LocalDate start,
 LocalDate end, LocalDate holdoutStart, int variantsTried, EvidenceLabel label, String notes)`.
 
 ### SB-502 — Lab: hypothesis file format
-- status: todo
+- status: dropped
 - depends: SB-501
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/HypothesisFile.java`, `application/src/test/java/io/github/signalbot/application/lab/HypothesisFileTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.HypothesisFileTest'`
 - expect: green; a text with a `---` block of `key: value` lines and a markdown body parses into a `Hypothesis` (body → notes); an unknown key, a duplicate key, a missing required key or a bad date fails with the key named; `format(parse(x))` keeps every field
 
+Superseded by D-010 (BT-016); kept for the record, not to be done.
+
 Pure: takes and returns `String` (the caller reads files). No YAML library (application has none).
 
 ### SB-503 — Lab: the first hypothesis, insider purchases
-- status: todo
+- status: dropped
 - depends: SB-502
 - size: S
 - paths: `docs/lab/hypotheses/H-001-insider-purchases.md`, `docs/lab/README.md`, `application/src/test/java/io/github/signalbot/application/lab/LabFilesTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.LabFilesTest'`
 - expect: green; `LabFilesTest` parses every file in `docs/lab/hypotheses/` (path from the module: `../docs/lab/hypotheses`) without error; H-001 has label CANDIDATE, variants 0 and says what data it needs (EDGAR Form 4, prices with delisted symbols) and that it is not measured yet
 
+Superseded by D-010 (BT-023); kept for the record, not to be done.
+
 `docs/lab/README.md`: what the lab is, the six labels, the file format of SB-502, and the rules (period and holdout
 fixed before the first run, every variant tried counted, delisted symbols kept, no look-ahead). Cluster parameters of
 SB-406 are written in H-001 as the first variant to try (3 owners, 10 days), marked as a guess.
 
-### SB-504 — Lab: sample statistics
-- status: todo
-- size: S
-- paths: `application/src/main/java/io/github/signalbot/application/lab/SampleStats.java`, `application/src/test/java/io/github/signalbot/application/lab/SampleStatsTest.java`
-- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.SampleStatsTest'`
-- expect: green; for [1, 2, 3, 4, 5]: n 5, mean 3, sample std √2.5, t = 3 / (√2.5 / √5); fewer than 2 values or zero spread give an empty t; NaN or infinite values are refused
-
-`record SampleStats(int n, double mean, double std, OptionalDouble t)` with `static SampleStats of(double[] xs)`.
-Hand-computed values in comments.
-
-### SB-505 — Lab: bootstrap interval with a fixed seed
-- status: todo
-- depends: SB-504
-- size: S
-- paths: `application/src/main/java/io/github/signalbot/application/lab/Bootstrap.java`, `application/src/test/java/io/github/signalbot/application/lab/BootstrapTest.java`
-- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.BootstrapTest'`
-- expect: green; the same seed gives the same interval twice; a constant sample gives a zero-width interval at that value; for 200 normal draws (seeded) the 95 % interval of the mean contains the sample mean and its width is within 20 % of 2 × 1.96 × std/√n
-
-Percentile bootstrap of the mean; `resamples` and `seed` are parameters.
-
-### SB-506 — Lab: the bar for many variants
-- status: todo
-- depends: SB-504
-- size: S
-- paths: `application/src/main/java/io/github/signalbot/application/lab/MultipleTesting.java`, `application/src/test/java/io/github/signalbot/application/lab/MultipleTestingTest.java`
-- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.MultipleTestingTest'`
-- expect: green; the required two-sided |t| for α = 0.05 is 1.96 (±0.01) for 1 variant, 2.24 for 2, 2.81 for 10, 3.48 for 100 (Bonferroni on the normal approximation); the inverse normal is accurate to 1e-6 at 0.975 and 0.999
-
-Inverse normal CDF by a published rational approximation (e.g. Acklam's), named in the Javadoc. Pure.
-
-### SB-507 — Lab: holdout split and walk-forward windows
-- status: todo
-- size: S
-- paths: `application/src/main/java/io/github/signalbot/application/lab/TimeSplits.java`, `application/src/test/java/io/github/signalbot/application/lab/TimeSplitsTest.java`
-- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.TimeSplitsTest'`
-- expect: green; windows (train 250 days, test 60, step 60) over 2018-01-01…2025-12-31 never overlap test parts, every test part starts after its train part ends, the last partial window is dropped; a holdout split by date puts the date itself in the holdout
-
-Dates are calendar dates (`LocalDate`); trading days come from the data later.
-
-### SB-508 — Lab: point-in-time bars refuse the future
-- status: todo
-- depends: SB-001
-- size: S
-- paths: `application/src/main/java/io/github/signalbot/application/lab/PointInTimeBars.java`, `application/src/test/java/io/github/signalbot/application/lab/PointInTimeBarsTest.java`
-- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.PointInTimeBarsTest'`
-- expect: green; `view(asOf).bars()` returns an unmodifiable list of the bars up to and including `asOf`, oldest first; `view(asOf).on(date)` returns the bar of that date and throws `IllegalStateException` naming both dates when `date` is after `asOf`; bars not sorted or with duplicate dates are refused at construction
-
-Pure. `PointInTimeBars(List<DailyBar>)` for one symbol; `view(LocalDate asOf)` returns a small `BarView` with
-`bars()` and `on(LocalDate)`. SB-511 gives a signal only `view(d).bars()`.
-
 ### SB-509 — Lab: a universe that keeps delisted symbols
-- status: todo
+- status: dropped
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/Universe.java`, `application/src/test/java/io/github/signalbot/application/lab/UniverseTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.UniverseTest'`
 - expect: green; a symbol listed 2019-03-01 and delisted 2022-06-30 is a member on 2020-01-01 and not on 2023-01-01; `delistedCount(start, end)` counts symbols delisted inside a period; a delisting before the listing is refused
 
+Superseded by D-010 (BT-001); kept for the record, not to be done.
+
 Pure. `record Listing(String symbol, LocalDate listed, LocalDate delisted)` (delisted null = still listed) and `Universe.of(List<Listing>)` with `membersOn(date)` and `delistedCount(start, end)`.
 
-### SB-510 — Lab: daily bars from a CSV file
-- status: todo
-- depends: SB-001
-- size: S
-- paths: `adapters/src/main/java/io/github/signalbot/lab/CsvBarDataset.java`, `adapters/src/test/java/io/github/signalbot/lab/CsvBarDatasetTest.java`, `adapters/src/test/resources/lab/**`
-- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.lab.CsvBarDatasetTest'`
-- expect: green; a synthetic CSV `symbol,date,open,high,low,close,volume` with three symbols (one stops trading half-way) loads into bars per symbol, oldest first; a bad number, a high below low or an unsorted date throws `SourceFailureException` naming the line
-
-Pure reading of a `Path` or `Reader`; no Spring bean needed. The fixture is generated by hand or by a seeded loop and
-committed; say how in its first comment line.
-
 ### SB-511 — Lab: a minimal backtest with an ATR stop
-- status: todo
+- status: dropped
 - depends: SB-005, SB-508
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/Backtest.java`, `application/src/main/java/io/github/signalbot/application/lab/BacktestTrade.java`, `application/src/test/java/io/github/signalbot/application/lab/BacktestTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.BacktestTest'`
 - expect: green; on a hand-made series, an entry signal on day d enters at the open of d + 1; the stop is `StopPolicy.forBuy(entry, null, Atr.wilder(bars up to d, 14))` (the D-002 rule, reused, not re-implemented); the exit is the stop or the close after `holdDays`; a gap under the stop exits at the open (worse than the stop); each trade reports its result in R
 
+Superseded by D-010 (BT-011); kept for the record, not to be done.
+
 One symbol, long only, no fees, no sizing. The signal is a `Predicate<List<DailyBar>>` that only gets
 `PointInTimeBars.view(d).bars()`. Test that a signal reading the future cannot (it gets no later bars).
 
 ### SB-512 — Lab: fees in the backtest
-- status: todo
+- status: dropped
 - depends: SB-511
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/Backtest.java`, `application/src/main/java/io/github/signalbot/application/lab/FeeFunction.java`, `application/src/test/java/io/github/signalbot/application/lab/BacktestFeesTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.*'`
 - expect: green; with a fee function of 1.00 per side and 1R = 5.00 per share for 1 share, a trade that gains exactly 1R before fees reports 0.6R after fees; without a fee function results are unchanged (`BacktestTest` passes untouched)
 
+Superseded by D-010 (BT-011, BT-013); kept for the record, not to be done.
+
 `FeeFunction` is an interface (`fee(price, shares)`); the application does not use `FeeModel` (an adapter) — the
 caller passes one built on it later.
 
 ### SB-513 — Lab: trailing take-profit in the backtest
-- status: todo
+- status: dropped
 - depends: SB-512, SB-012
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/Backtest.java`, `application/src/test/java/io/github/signalbot/application/lab/BacktestTrailingTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.*'`
 - expect: green; with the option on, exits come from `ExitGuard` armed with `armTrailing` at D-004's starting values (activation entry + 2R, offset 1 ATR), driven by each day's low then high then close (order written in the Javadoc), and a hand-made series shows activation, a new best and the trail exit
 
+Superseded by D-010 (BT-012); kept for the record, not to be done.
+
 Reuse `ExitGuard` (one rule in one place). Daily bars cannot know the intraday order: the low-high-close order is the
 conservative choice (stop checked first); say so in the Javadoc.
 
 ### SB-514 — Lab: walk-forward run
-- status: todo
+- status: dropped
 - depends: SB-507, SB-511
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/WalkForward.java`, `application/src/main/java/io/github/signalbot/application/lab/Backtest.java`, `application/src/test/java/io/github/signalbot/application/lab/WalkForwardTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.WalkForwardTest'`
 - expect: green; trades are collected only from test parts, each tagged with its window; a trade entered in one test part and still open at its end is closed at that end's close; windows with no trade are reported with n 0
 
+Superseded by D-010 (BT-023); kept for the record, not to be done.
+
 Pure; uses `TimeSplits` (SB-507) and `Backtest` (SB-511). `Backtest` gains an optional "close what is open at the
 last bar" exit (kind `END_OF_DATA`) — off by default, so `BacktestTest` and the other lab tests pass unchanged.
 
 ### SB-515 — Lab: from numbers to a label
-- status: todo
+- status: dropped
 - depends: SB-501, SB-504, SB-506
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/LabelRule.java`, `application/src/test/java/io/github/signalbot/application/lab/LabelRuleTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.LabelRuleTest'`
 - expect: green; n < 30 in sample → CANDIDATE; |t| below the bar of SB-506 for the variants tried → VERIFIED_NO_EDGE; above the bar and the holdout mean has the same sign and is > 0 → VERIFIED_WORKS; above the bar but the holdout disagrees → VERIFIED_NO_EDGE; each case in a table
 
+Superseded by D-010 (BT-017); kept for the record, not to be done.
+
 The rule's numbers (30 trades, α 0.05) are named constants with the comment "lab starting rule, Aika may change"; write
 the rule as one bullet under "Backlog run (December 2026)" in `DECISIONS.md`.
 
 ### SB-516 — Lab: the experiment log counts variants
-- status: todo
+- status: dropped
 - depends: SB-501
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/ExperimentRecord.java`, `application/src/test/java/io/github/signalbot/application/lab/ExperimentRecordTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.ExperimentRecordTest'`
 - expect: green; a record (hypothesis id, variant text, data file hash, period, n, mean R, t, date run) formats to one markdown table row and parses back; `variantsTried(records, "H-001")` counts distinct variant texts, so re-running the same variant does not inflate the count
 
+Superseded by D-010 (BT-016); kept for the record, not to be done.
+
 Pure; the log file itself (`docs/lab/experiments/H-NNN.md`) is written by whoever runs a measurement — this task only formats and parses rows.
 
 ### SB-517 — Lab: the report
-- status: todo
+- status: dropped
 - depends: SB-501, SB-505, SB-515
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/LabReport.java`, `application/src/test/java/io/github/signalbot/application/lab/LabReportTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.LabReportTest'`
 - expect: green; the markdown report of a fixed input shows hypothesis, data and period, holdout, n, mean R with its bootstrap interval, t and the bar for the variants tried, the label with its text, the number of delisted symbols in the data, and the line "point-in-time data: yes"; the test checks each expected line with `contains`, not the whole text (SB-519 adds lines)
 
+Superseded by D-010 (BT-018); kept for the record, not to be done.
+
 Pure; inputs are values (hypothesis, `SampleStats`, interval, holdout mean, label, delisted count), not files.
 
 ### SB-518 — Lab: one run end to end on the fixture
-- status: todo
+- status: dropped
 - depends: SB-509, SB-510, SB-514, SB-517
 - size: S
 - paths: `adapters/src/test/java/io/github/signalbot/lab/LabEndToEndTest.java`, `adapters/src/test/resources/lab/**`
 - verify: `./gradlew :adapters:test --tests 'io.github.signalbot.lab.LabEndToEndTest'`
 - expect: green; CSV fixture → walk-forward backtest of a simple rule (close above the 20-day high) → stats → label → report; two runs give the identical report; the test checks on the trade list (not the report) that the delisted symbol produced trades, and the report's delisted count comes from `Universe` (SB-509), not a second count
 
+Superseded by D-010 (BT-023); kept for the record, not to be done.
+
 This proves the pipe, not the rule: the test asserts determinism and structure, not that the rule makes money.
 
 ### SB-519 — Lab: expectancy in the report comes from `Expectancy`
-- status: todo
+- status: dropped
 - depends: SB-016, SB-517
 - size: S
 - paths: `application/src/main/java/io/github/signalbot/application/lab/LabReport.java`, `application/src/test/java/io/github/signalbot/application/lab/LabReportExpectancyTest.java`
 - verify: `./gradlew :application:test --tests 'io.github.signalbot.application.lab.*'`
 - expect: green; the report adds win rate, average win, average loss and E from `application/review/Expectancy` (one rule in one place: no second expectancy formula in `lab`); `LabReportTest` passes unchanged
 
+Superseded by D-010 (BT-014); kept for the record, not to be done.
+
 Read `Expectancy` (SB-016) and `LabReport` (SB-517). `LabReportTest` checks lines with `contains`, so added lines keep it green.
-
-### SB-520 — Drawdown and losing streak in R
-- status: todo
-- size: S
-- paths: `application/src/main/java/io/github/signalbot/application/review/Drawdown.java`, `application/src/test/java/io/github/signalbot/application/review/DrawdownTest.java`
-- verify: `./gradlew :application:test --tests 'io.github.signalbot.application.review.DrawdownTest'`
-- expect: green; for R results [+1, −1, −1, +2, −1, −1, −1, +0.5] the maximum drawdown is 3R and the longest losing streak 3; no trades → 0 and 0; only winners → 0 and 0
-
-Pure, `BigDecimal`. Used later by the weekly journal (SB-605) and the lab report; one place for both.
 
 ## Trade journal and results in R
 
@@ -1903,12 +2317,14 @@ Method: the section header. Search with `grep -rn` for arithmetic with `fee`, `f
 ## Docs after the work
 
 ### SB-901 — Lab README: how to read a report
-- status: todo
+- status: dropped
 - depends: SB-503, SB-518
 - size: S
 - paths: `docs/lab/README.md`
 - verify: `grep -nE 'walk-forward|holdout|delisted|variants|look-ahead|label' docs/lab/README.md`
 - expect: `docs/lab/README.md` gains a section "Reading a report" that walks through the report of SB-518 line by line, and "Not measured yet" listing every hypothesis file with label CANDIDATE
+
+Superseded by D-010 (BT-027); kept for the record, not to be done.
 
 Write from the code and the report of SB-518 as merged; keep the rules section of SB-503 as it is.
 
@@ -1971,15 +2387,6 @@ Tech debt `2026-11-26-SB-002-1.md`. Change only the `alpaca` retry line.
 - expect: green; `StopPolicy.describe()` returns the band sentence built from `K`, `MIN_ATR`, `MAX_ATR`; the system prompt uses it and its text is byte-for-byte what it is today (every existing prompt test, including a golden file if SB-240 is merged, passes unchanged)
 
 Tech debt `2026-11-26-SB-011-1.md`. The numbers stay where they are (D-005); only the duplication goes.
-
-### SB-957 — The D-004 trailing factors live in `application`
-- status: todo
-- size: S
-- paths: `application/src/main/java/io/github/signalbot/application/trigger/TrailingPolicy.java`, `application/src/test/java/io/github/signalbot/application/trigger/TrailingPolicyTest.java`, `adapters/src/main/java/io/github/signalbot/execution/ExecutionService.java`
-- verify: `./gradlew build`
-- expect: green; `TrailingPolicy.forFill(fill, stop, atr)` returns activation fill + 2R, offset 1 ATR, spread 0.1 ATR (starting values, D-004/D-005, constants moved — not changed); `ExecutionService.trailingFor` delegates to it; every existing test passes unchanged
-
-Tech debt `2026-11-26-SB-013-1.md`. The lab's backtest (SB-513) can then reuse the same rule.
 
 ### SB-958 — SYMBOL_CONCENTRATION is marked as no longer used (#24)
 - status: todo
