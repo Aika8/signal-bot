@@ -19,6 +19,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * the activation price the best price is not tracked; from activation on, {@code best = max(best, price)} and the
  * exit fires once when {@code price < best − offset}. The stop stays armed after activation and is checked first,
  * so a gap through both gives the stop.
+ *
+ * <p>Every method that changes the armed levels ({@link #arm}, {@link #armTrailing}, {@link #restore},
+ * {@link #disarm}, {@link #onPrice}) is {@code synchronized} on this guard, so an arm or disarm never lands
+ * between the read and the write of {@code onPrice} and gets overwritten by the old state. The read-only
+ * {@link #state} and {@link #armedSymbols} read the concurrent map without the lock.
  */
 public final class ExitGuard {
 
@@ -49,7 +54,7 @@ public final class ExitGuard {
     private final Map<String, Levels> armed = new ConcurrentHashMap<>();
 
     /** Sets (or resets) the stop/take-profit levels for a symbol and re-arms both. */
-    public void arm(String symbol, BigDecimal stop, BigDecimal takeProfit) {
+    public synchronized void arm(String symbol, BigDecimal stop, BigDecimal takeProfit) {
         armed.put(symbol, Levels.fixed(stop, takeProfit));
     }
 
@@ -57,7 +62,7 @@ public final class ExitGuard {
      * Sets (or resets) a stop and a trailing take-profit for a symbol (D-004): not activated, no best price, both
      * re-armed. Replaces any fixed take-profit armed before.
      */
-    public void armTrailing(String symbol, BigDecimal stop, TrailingLevels trailing) {
+    public synchronized void armTrailing(String symbol, BigDecimal stop, TrailingLevels trailing) {
         Objects.requireNonNull(trailing, "trailing");
         armed.put(symbol, Levels.trailing(stop, trailing, null, false));
     }
@@ -66,7 +71,7 @@ public final class ExitGuard {
      * Re-arms a stop and a trailing take-profit with the persisted trailing state, so a restart does not reset
      * trailing (D-004). {@code best} is {@code null} exactly when {@code activated} is false.
      */
-    public void restore(String symbol, BigDecimal stop, TrailingLevels trailing, BigDecimal best,
+    public synchronized void restore(String symbol, BigDecimal stop, TrailingLevels trailing, BigDecimal best,
                         boolean activated) {
         Objects.requireNonNull(trailing, "trailing");
         TrailingState state = new TrailingState(best, activated);
@@ -82,7 +87,7 @@ public final class ExitGuard {
         return Optional.of(new TrailingState(l.best(), l.activated()));
     }
 
-    public void disarm(String symbol) {
+    public synchronized void disarm(String symbol) {
         armed.remove(symbol);
     }
 
