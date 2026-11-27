@@ -9,6 +9,7 @@ Format of a task (the script parses it; `backlog.py lint` checks it):
 - `### ID — title`, then fields, a blank line, the description (at most ~1500 tokens).
 - `status`: `todo` | `waiting` (needs Aika; `waits` says what) | `done` | `dropped`. A task is *done* when the
   PR from its branch `claude/<id in lower case>` is merged; nobody edits the status for that.
+- `priority: bug` (set by intake for `kind: bug` tech debt): picked before any other ready task.
 - `depends`: ids that must be done first. `needs`: `docker` when the cloud image may lack it.
 - `paths`: the only files the PR may change (plus `DECISIONS.md`). Globs: `*` within a folder, `**` across folders.
 - `rewrites`: existing test files this task may edit, because it changes the behaviour they pin by Aika's decision

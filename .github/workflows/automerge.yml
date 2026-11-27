@@ -60,6 +60,14 @@ jobs:
         with:
           ref: main
       - name: Merge agent PRs that passed every gate
+        id: sweep
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/backlog/backlog.py automerge
+      # A merge made with GITHUB_TOKEN starts no workflow, so intake is started here: a merged proposals PR or a task
+      # PR with a tech-debt note enters the queue within minutes, not at the next cron.
+      - name: Run intake after a merge
+        if: steps.sweep.outputs.merged == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run intake.yml --ref main

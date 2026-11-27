@@ -102,7 +102,9 @@ gh api -X POST repos/Aika8/signal-bot/issues/<n>/comments -F body=@/tmp/review.m
 
 On a **pass** there is no fix round to turn "Out of scope" into files, so open one issue per finding:
 `gh api -X POST repos/Aika8/signal-bot/issues -f title="[tech-debt] <one line>" -F body=@/tmp/debt.md
--f "labels[]=tech-debt"` (body in the format of `docs/backlog/TECH-DEBT.md`).
+-f "labels[]=tech-debt"`, where `/tmp/debt.md` is written in the format of `docs/backlog/TECH-DEBT.md` (`### title`,
+`kind: bug|debt`, `size`, `paths`, `verify`, `expect`, `why`): the intake then turns it into a task by itself, bugs
+first, and closes the issue.
 
 Classify findings like the executor (`docs/backlog/TECH-DEBT.md`): a regression inside the change → a "no" answer;
 the task itself wrong → fail and say "park: <reason>"; outside the task → "Out of scope", not a failure. A new test

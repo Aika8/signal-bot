@@ -233,6 +233,15 @@ live calls) are listed in `docs/backlog/QUESTIONS-BEFORE-LEAVE.md` under "After 
 - **Lab as a Gradle module, PIT plugin** → not now: both need build files, which agents may not change. The lab stays
   in `application/lab`; mutation testing stays by hand (SB-701…SB-717).
 
+## Tech debt becomes tasks by itself (2026-11-27, ported from learning-exchange PR #112)
+
+- `backlog.py intake` also reads every `docs/backlog/tech-debt/*.md` and every open `tech-debt` issue by the owner or
+  collaborators, all in the proposal format (`docs/backlog/TECH-DEBT.md`); `kind: bug` → `priority: bug`, which
+  `next_task` picks before any other ready task; an issue is closed once all its proposals are tasks (re-checked on
+  every run). Intake runs after every automerge sweep that merged, on `tech-debt` issue events, and every 3 hours.
+  signal-bot keeps its differences: no daily cap, log dedupe, `replaces`.
+- `gradle.properties`: Gradle retries a Maven Central 429 eight times from 3 s (issue #18), instead of 3 times.
+
 ## Tech-debt bugs of 2026-11-27, decided without Aika
 
 Aika's instruction: nothing waits for her. The queue author turned the behaviour bugs of the tech-debt register
