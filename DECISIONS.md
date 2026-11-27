@@ -494,6 +494,15 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   (`CAST(:x AS NUMERIC(20, 6))`), so in-memory levels with more decimals than V7 stores still match their own row.
   Not taken: retrying on every tick (an INFO line and an UPDATE per tick for a write that cannot succeed); comparing
   the raw values (an ATR with more than 6 decimals would never match and no state would ever be saved).
+- **SB-039** — Details of splitting long Telegram messages. Choices: (1) the limit 4 096 is counted in Java `char`s
+  (UTF-16 code units), and a hard cut never separates a surrogate pair (it moves one char earlier); (2) a line break
+  "within the last 500 characters" means a `\n` at index limit − 500 … limit − 1 of the part; the `\n` stays at the
+  end of the part it closes, so the parts joined are exactly the original; (3) the nightly review splits the whole
+  pushed text (`Daily review\n` + review), so the header is only on part 1; (4) when a part fails (after the
+  sender's own retries) the remaining parts are not sent and a WARN names the part — later parts without the
+  earlier ones would read as a whole review. Not taken: a loop inside `TelegramSender` (the task forbids it);
+  counting Unicode code points (Telegram's limit is closer to UTF-16 length, and the smaller count is the safe
+  side); continuing after a failed part. Undo: `TelegramText.cut` and `NightlyReviewJob.push`.
 - **SB-037** — Which context ATR does the BUY gate take as "the ATR Claude saw"? Choice: only a positive
   `ctx.atr()`; a null (not available) or a zero/negative one falls back to fetching the bars as before, so the
   rejection reasons ("no ATR: …", "no usable stop") stay exactly as today. Not taken: trusting any non-null
