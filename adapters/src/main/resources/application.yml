@@ -62,6 +62,8 @@ signalbot:
     timeout: ${EXECUTION_TIMEOUT:PT30M}  # PENDING older than this becomes EXPIRED
     auto-fill-delay: PT60S               # AUTO: delay before auto-fill at last price
     sweep-ms: 15000                      # how often the execution sweeper runs
+  risk:
+    earnings-blackout-trading-days: 2    # starting value, D-006/D-005; 0 = off
 
 resilience4j:
   retry:
