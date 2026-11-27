@@ -8,6 +8,22 @@ findings.
 
 ---
 
+## D-007 — No BUY with a stop at or below zero (2026-11-27, decided without Aika)
+
+**Decided without Aika** (her instruction: nothing waits for her). **Undo:** remove the two guards in
+`StopPolicy.forBuy` (task SB-031).
+
+**Context.** Issue #16: on a cheap or very volatile instrument `entry − 2 × ATR` is ≤ 0, and `StopPolicy` returned it
+as a valid stop; sizing and the Telegram prompt would show it as a real stop with a meaningless 1R.
+
+**Decision.** A Claude stop ≤ 0 is unusable and replaced by the ATR stop (as D-002 replaces any unusable stop). If the
+ATR stop is ≤ 0 too, there is no usable stop: the BUY is **REJECTED** "no usable stop" (D-002: never a BUY without a
+stop).
+
+**Not taken.** Clamping the stop to a tiny positive price (a fake, huge 1R); a wider band (a starting value, D-005).
+
+---
+
 ## D-006 — No new BUY just before the company's earnings (2026-11-26, decided without Aika)
 
 **Decided without Aika** (her instruction of 2026-11-26: "nothing should wait for me"; the queue author chose the
@@ -216,6 +232,26 @@ live calls) are listed in `docs/backlog/QUESTIONS-BEFORE-LEAVE.md` under "After 
   per symbol). Undo: the key in `SignalDispatcher.dispatch`.
 - **Lab as a Gradle module, PIT plugin** → not now: both need build files, which agents may not change. The lab stays
   in `application/lab`; mutation testing stays by hand (SB-701…SB-717).
+
+## Tech-debt bugs of 2026-11-27, decided without Aika
+
+Aika's instruction: nothing waits for her. The queue author turned the behaviour bugs of the tech-debt register
+into tasks SB-031…SB-040 at the front of the queue and chose where a choice was needed:
+
+- **#16, stop ≤ 0 (SB-031)** → D-007.
+- **#28, #30, races (SB-032, SB-033)** → `ExitGuard`'s mutating methods share one monitor; a trailing-state write
+  only matches a guard row with the same levels. No behaviour choice; undo = revert. SB-033 may edit
+  `TrailingRestartTest` (`rewrites`): only its in-memory store fake gains the override of the new conditional
+  `saveTrailingState`, so the fake keeps recording writes; no assertion changes.
+- **#31, re-fire after restart (SB-034)** → test first; the code deletes the guard row when an exit fires, so it may
+  not reproduce. Found with it: a Skipped or expired exit SELL leaves the position with no stop → **SB-035 lists such
+  positions in the nightly review**. Not taken: re-arming the stop (the price is usually already below it, so it
+  would fire and prompt again in a loop); re-arming the trailing take-profit (its best price is gone). Undo: the
+  line in `NightlyReviewJob`.
+- **#24, unused SYMBOL_CONCENTRATION (SB-958)** → deprecated, not deleted. Undo: remove the annotation.
+- **#40/#42, 14-day horizon (SB-954)** → values above the horizon are refused at startup. Not taken: widening the
+  horizon. Undo: remove the check.
+- **#18, first Gradle run fails (Maven 429)** → not queued here; the coordinator's common fix comes separately.
 
 ## Backlog run (December 2026)
 
