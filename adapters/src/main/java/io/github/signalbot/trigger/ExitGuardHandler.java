@@ -49,7 +49,14 @@ public class ExitGuardHandler {
         String symbol = signal.symbol();
         // Disarm so the level never re-fires until a new verdict re-arms it.
         exitGuard.disarm(symbol);
-        guardStore.delete(symbol);
+        try {
+            guardStore.delete(symbol);
+        } catch (RuntimeException e) {
+            // AUTO-20261127-5: a store outage must not silence a fired exit. The in-memory guard is disarmed;
+            // the stored row may re-arm on restart, but the alert and the SELL still go out now.
+            LOG.error("Exit {} for {}: deleting the stored guard failed; alerting anyway",
+                    signal.type(), symbol, e);
+        }
 
         Position held;
         try {
