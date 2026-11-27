@@ -41,27 +41,29 @@ happen inside one bar the stop (the worse) counts; a stop inside the bar fills a
 its level. On the entry bar only the stop is checked (low), never trailing. No time exit (live has none). A test
 replaces every bar after D and checks that nothing decided up to D changes.
 
-**4. Prices: split-adjusted for the rules, raw for levels and shares.** ATR, returns, averages and stop distances use
-split-adjusted bars (D-008). Anything that depends on the price *level* of the day — `close ≥ 5 USD`, the screener's
-`price ≤ max`, the number of shares and the per-share fee — uses the raw (unadjusted) price of that day; the store
-keeps both series, and a scale (raw ÷ adjusted close of the day) converts between them. Otherwise a later split
-would leak into past filters.
+**4. Prices: split-adjusted for the rules, raw for levels and shares.** ATR, ATR%, returns, averages, stops, the
+exit guard and R use split-adjusted bars (D-008). Anything that depends on the *level* of the day — `close ≥ 5 USD`,
+the screener's `price ≤ max`, volume in shares (ADV), the number of shares bought and the per-share fee — uses the
+raw (unadjusted) series of that day; the store keeps both, and a scale (raw ÷ adjusted close of the day) converts
+between them. Otherwise a later split would leak into past filters.
 
 **5. Universe instead of lists.** A port answers "which symbols could be traded on day D". First implementation: the
 symbols of Alpaca's active, tradable `us_equity` list (ETFs included, as Alpaca lists them; OTC excluded) that have a
 bar on D in the local store, filtered by **raw close ≥ 5 USD** and **average dollar volume of the 20 sessions before
 D ≥ 20 million USD** (starting values). Today's list holds today's companies only: **every report says delisted
 companies are missing and results are biased upwards.** `screen.candidates` goes; the screener ranks the universe
-with R3. The live watchlist becomes **held ∪ armed ∪ top N of a rule** (`signalbot.watchlist.rule`, default R3),
-with **N = 5 by default — the size of today's list**, because every symbol costs Claude calls (paid API); the free
-IEX stream allows up to 30, and raising N is Aika's decision. `signalbot.watchlist.symbols` stays as an explicit
+with R3. The live watchlist becomes **held, then armed, then the top of a rule** (`signalbot.watchlist.rule`, default
+R3) up to **5 symbols in total by default — the size of today's list**, because every symbol costs Claude calls
+(paid API); held and armed are never cut; the free IEX stream allows up to 30, and raising the total is Aika's
+decision. It is computed once a day. `signalbot.watchlist.symbols` stays as an explicit
 override (empty by default). A missing or stale store (last day older than 5 trading days) gives held ∪ armed only
-(exits keep working, no new entries) and an operator alert (D-001). The stream re-subscribes once a day.
+(exits keep working, no new entries) and an operator alert (D-001). The stream re-subscribes once a day (close, then subscribe —
+the free plan allows one connection; on failure the old list again, else snapshots keep the exits).
 
 **6. History on disk, loaded by Aika.** One CSV per symbol (split-adjusted) and one `.raw.csv` (raw) under
 `${SIGNALBOT_DATA_DIR:-~/.signal-bot/history}`, outside the repository; SPY also as a total-return series
-(`adjustment=all`) for the benchmark only. The loader re-fetches a symbol whole when a new split changes the
-overlapping bar. A bar that `DailyBar` refuses skips that symbol (listed in the load summary), it never enters the
+(`adjustment=all`) for the benchmark only. History starts 2015-01-01 so that 100-session rules are ready when
+training starts. The loader re-fetches a symbol whole when a new split changes the overlapping bar. A bar that `DailyBar` refuses skips that symbol (listed in the load summary), it never enters the
 store. The loader needs Alpaca keys, which the cloud never has: agents build and test on fixtures and synthetic
 series; Aika runs `./gradlew screen --args='history-load'` and `…='backtest --rule R1'` (the `screen` entry point;
 build files are hers; memory via `JAVA_TOOL_OPTIONS=-Xmx8g`).
