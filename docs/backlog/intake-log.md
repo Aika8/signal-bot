@@ -9,3 +9,4 @@ Written by `scripts/backlog/backlog.py intake` (GitHub Actions, daily): which pr
 - accepted: AUTO-20261127-3 ← issue#64#1 «Isolate each price tick's exit/trailing/evaluator steps from one another's failures»
 - accepted: AUTO-20261127-4 ← issue#67#1 «Split long verdict messages in TelegramNotifier»
 - accepted: AUTO-20261127-5 ← issue#69#1 «Alert the operator when deleting the stored guard fails on a fired exit»
+- accepted: AUTO-20261127-6 ← issue#71#1 «Use the New York date for the screener's earnings window»
