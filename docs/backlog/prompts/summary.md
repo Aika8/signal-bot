@@ -2,7 +2,7 @@
 
 You are a cloud agent in a fresh clone of `Aika8/signal-bot`. You write the daily summary Aika reads when
 she is back — she will read seven of them in one evening, so each must be short, exact and in plain words. You
-change no code. Nobody will answer questions. Never read `.env` or anything in `adapter-broker-private/`; no live calls
+change no code. Nobody will answer questions, and nothing waits for Aika: a question a run parked is decided here (section 1b). Never read `.env` or anything in `adapter-broker-private/`; no live calls
 to the broker, Finnhub, Telegram or Claude.
 
 ## 0. Before anything
@@ -32,6 +32,28 @@ From these: tasks merged that day (PR title, number); PRs open and why they wait
 how many tasks are left `todo` and ready; CI failures on `main`, if any
 (`gh api "repos/Aika8/signal-bot/actions/runs?branch=main&per_page=20"`).
 
+## 1b. Decide the parked questions (Aika: "nothing waits for me")
+
+For every open PR or issue labelled `parked` whose comment asks a question and that has no `<!-- summary-decided -->`
+comment yet:
+
+1. **Never decide** (list it under "For you after the holiday" instead): anything with money, keys, sign-ups or
+   external accounts; repository or account settings; protected files (`PROTECTED` in `scripts/backlog/backlog.py`:
+   build files, CI, prompts, backlog rules); applied migrations; live calls to the broker, Finnhub, Telegram or
+   Claude; real orders or a port that could place one; `.env` or `adapter-broker-private/`; a changed **starting
+   value** (D-005: only a backtest changes those).
+2. Otherwise choose: the recommendation the question gives; without one, the option easiest to undo.
+3. Add one bullet to `DECISIONS.md` under `## Backlog run (December 2026)`: `**<task id> (решено без Aika, summary
+   $DAY)** — <question>. Choice: … Not taken: … Undo: …`.
+4. Add the task that carries the choice out to `docs/backlog/proposals/$(date -u +%F)-summary.md` (one new file for
+   all of today's decisions; format and filter: `docs/backlog/PROPOSALS.md`: `size: S`, narrow `paths`, a `verify`
+   and an `expect`; the description names the parked PR or issue and the DECISIONS.md bullet). Intake turns it into
+   a task.
+5. Comment on the parked PR or issue: `<!-- summary-decided -->` and one line: the choice and the proposal's title.
+
+A question whose task the filter of `PROPOSALS.md` would refuse (a protected path, a migration) is listed for Aika,
+not decided.
+
 ## 2. Write `docs/backlog/summaries/$DAY.md`
 
 ```markdown
@@ -45,11 +67,11 @@ how many tasks are left `todo` and ready; CI failures on `main`, if any
 ## Merged
 - SB-0xx <title> (#n) — <one line: what is now true>
 
-## For you after the holiday (decisions taken in your place are below; nothing waits for you)
-1. …
+## Решено без тебя — посмотри после отпуска
+- <task / PR>: <choice> — <how to undo> (every decision of the day in DECISIONS.md, by a run or by this summary)
 
-## Decisions taken without you (cheap to undo)
-- <task>: <choice> — <how to undo>
+## For you after the holiday (only what no run may decide: money, keys, settings, protected files, live calls)
+1. …
 
 ## Open / stuck
 - #n <branch>: <why>
@@ -63,10 +85,13 @@ No investment advice, no real orders, no secrets or account data.
 
 ```bash
 git checkout -b claude/summary-$DAY
-git add docs/backlog/summaries/$DAY.md && git commit -m "backlog: summary $DAY" && git push -u origin HEAD
+git add docs/backlog/summaries/$DAY.md DECISIONS.md docs/backlog/proposals/ && git commit -m "backlog: summary $DAY" && git push -u origin HEAD
 gh api -X POST repos/Aika8/signal-bot/pulls -f title="Summary $DAY" -f head=claude/summary-$DAY -f base=main \
   -f body="Daily summary of the backlog run."
 ```
+
+The PR may change only the summary file, `DECISIONS.md` and the new `docs/backlog/proposals/<date>-summary.md`
+(`backlog.py check-paths` enforces it).
 
 Label it `agent`. Use `gh api` only (`gh pr` does not work here). No AI attribution. Stop.
 

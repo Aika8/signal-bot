@@ -1,7 +1,8 @@
 # Proposals: format and how they reach the queue
 
 Proposal runs (none is scheduled for signal-bot yet; Aika may add one later) do not change the queue. Each writes its proposals of the day into a **new file**
-`docs/backlog/proposals/<YYYY-MM-DD>-<role>.md` (role: `analyst` or `user`; the date is the UTC date of the run),
+`docs/backlog/proposals/<YYYY-MM-DD>-<role>.md` (role: `analyst` or `user`; the date is the UTC date of the run). The summary run adds `<date>-summary.md`
+in its own PR for the parked questions it decided (`prompts/summary.md`, 1b); intake reads it the same way,
 on a branch `claude/proposals-<role>-<YYYY-MM-DD>`, and opens a PR. Automerge merges such a PR without review when it
 adds only that one file. (One file per run instead of one shared file: two runs a day appending to the same file
 would conflict.)

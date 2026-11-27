@@ -217,6 +217,24 @@ live calls) are listed in `docs/backlog/QUESTIONS-BEFORE-LEAVE.md` under "After 
 - **Lab as a Gradle module, PIT plugin** → not now: both need build files, which agents may not change. The lab stays
   in `application/lab`; mutation testing stays by hand (SB-701…SB-717).
 
+## Tech-debt bugs of 2026-11-27, decided without Aika
+
+Aika's instruction: nothing waits for her. The queue author turned the behaviour bugs of the tech-debt register
+into tasks SB-031…SB-040 at the front of the queue and chose where a choice was needed:
+
+- **#16, stop ≤ 0 (SB-031)** → no stop, the BUY is rejected. Not taken: clamping to a tiny positive stop (a fake 1R).
+  Undo: remove the guard in `StopPolicy.forBuy`.
+- **#28, #30, races (SB-032, SB-033)** → `ExitGuard`'s mutating methods share one monitor; a trailing-state write
+  only matches a guard row with the same levels. No behaviour choice; undo = revert.
+- **#31, re-fire after restart (SB-034)** → test first; the code deletes the guard row when an exit fires, so it may
+  not reproduce. Found with it: a Skipped or expired exit SELL leaves the position with no stop → **SB-035 re-arms
+  the stop only**. Not taken: re-arming the trailing take-profit (its best price is gone); doing nothing. Undo: the
+  re-arm call in `ExecutionService`.
+- **#24, unused SYMBOL_CONCENTRATION (SB-958)** → deprecated, not deleted. Undo: remove the annotation.
+- **#40/#42, 14-day horizon (SB-954)** → values above the horizon are refused at startup. Not taken: widening the
+  horizon. Undo: remove the check.
+- **#18, first Gradle run fails (Maven 429)** → not queued here; the coordinator's common fix comes separately.
+
 ## Backlog run (December 2026)
 
 Decisions the cloud agents took without Aika, one bullet each (task id, question, choice, options not taken).

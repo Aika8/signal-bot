@@ -480,8 +480,13 @@ def check_paths(branch: str, changes: list[Change], tasks: list[Task], root: Pat
         elif kind == "summary":
             day = branch.rsplit("-", 3)[-3:]
             want = f"docs/backlog/summaries/{'-'.join(day)}.md"
-            if c.path != want:
-                problems.append(f"{c.path}: a summary PR changes only {want}")
+            # signal-bot ("nothing waits for Aika"): the summary also decides parked questions — a DECISIONS.md
+            # bullet and a new proposals file that intake turns into the task doing the chosen option.
+            decided = (c.path == "DECISIONS.md" and c.status == "modified") or (
+                c.status == "added" and re.match(r"^docs/backlog/proposals/\d{4}-\d{2}-\d{2}-summary\.md$", c.path))
+            if c.path != want and not decided:
+                problems.append(f"{c.path}: a summary PR changes only {want}, DECISIONS.md and a new "
+                                f"docs/backlog/proposals/<date>-summary.md")
     return sorted(set(problems))
 
 
