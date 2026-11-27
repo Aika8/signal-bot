@@ -14,7 +14,8 @@ import java.util.Objects;
  * @param close  last trade price of the day
  * @param volume traded volume
  * @throws IllegalArgumentException if a field is null, a price is negative,
- *                                  {@code high < low} or the volume is negative
+ *                                  {@code high < low}, {@code open} or {@code close}
+ *                                  lies outside {@code [low, high]}, or the volume is negative
  */
 public record DailyBar(
         LocalDate date,
@@ -34,6 +35,8 @@ public record DailyBar(
         if (high.compareTo(low) < 0) {
             throw new IllegalArgumentException("high " + high + " < low " + low + " on " + date);
         }
+        requireWithinRange(open, "open", low, high, date);
+        requireWithinRange(close, "close", low, high, date);
         if (volume < 0) {
             throw new IllegalArgumentException("negative volume " + volume + " on " + date);
         }
@@ -42,6 +45,14 @@ public record DailyBar(
     private static void requireNonNull(Object value, String field) {
         if (Objects.isNull(value)) {
             throw new IllegalArgumentException(field + " is null");
+        }
+    }
+
+    private static void requireWithinRange(BigDecimal price, String field,
+                                           BigDecimal low, BigDecimal high, LocalDate date) {
+        if (price.compareTo(low) < 0 || price.compareTo(high) > 0) {
+            throw new IllegalArgumentException(
+                    field + " " + price + " outside [low " + low + ", high " + high + "] on " + date);
         }
     }
 
