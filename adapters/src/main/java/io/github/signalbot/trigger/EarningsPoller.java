@@ -1,5 +1,6 @@
 package io.github.signalbot.trigger;
 
+import io.github.signalbot.application.calendar.TradingDays;
 import io.github.signalbot.application.trigger.TriggerEvaluator;
 import io.github.signalbot.config.TriggerProperties;
 import io.github.signalbot.config.WatchlistProperties;
@@ -11,14 +12,13 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 
 /**
  * Daily poll for upcoming earnings; raises T3 once per symbol+date when earnings
- * are within the configured number of trading days. Trading days are approximated
- * as weekdays (holidays are ignored for now).
+ * are within the configured number of trading days ({@link TradingDays}: weekdays,
+ * holidays are ignored for now).
  */
 @Component
 public class EarningsPoller {
@@ -63,20 +63,8 @@ public class EarningsPoller {
         }
     }
 
+    /** Kept for existing callers and tests; the rule lives in {@link TradingDays}. */
     static boolean withinTradingDays(LocalDate from, LocalDate target, int maxTradingDays) {
-        if (target.isBefore(from) || target.isAfter(from.plusDays(14))) {
-            return false;
-        }
-        int tradingDays = 0;
-        for (LocalDate d = from.plusDays(1); !d.isAfter(target); d = d.plusDays(1)) {
-            if (isWeekday(d)) {
-                tradingDays++;
-            }
-        }
-        return tradingDays <= maxTradingDays && (isWeekday(target) || target.equals(from));
-    }
-
-    private static boolean isWeekday(LocalDate date) {
-        return date.getDayOfWeek() != DayOfWeek.SATURDAY && date.getDayOfWeek() != DayOfWeek.SUNDAY;
+        return TradingDays.withinTradingDays(from, target, maxTradingDays);
     }
 }
