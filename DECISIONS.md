@@ -488,3 +488,9 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   sets the starting value 2; (5) `Clock` is a `@ConditionalOnMissingBean` bean in `ClockConfig`. Not taken:
   catching only `SourceFailureException` (a breaker exception would then escape `handle` and drop the verdict
   without a notice). Undo: `LiveDecisionHandler.earningsBlackout`.
+- **SB-033** — What does the trailing writer do when the conditional write updates 0 rows, and how are the levels
+  compared? Choice: log at INFO and remember the state as handled, so the same stale state is not retried on every
+  tick (the next new best or activation tries again); the store compares the levels at the columns' scale
+  (`CAST(:x AS NUMERIC(20, 6))`), so in-memory levels with more decimals than V7 stores still match their own row.
+  Not taken: retrying on every tick (an INFO line and an UPDATE per tick for a write that cannot succeed); comparing
+  the raw values (an ATR with more than 6 decimals would never match and no state would ever be saved).
