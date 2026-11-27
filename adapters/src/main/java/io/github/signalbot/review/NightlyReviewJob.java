@@ -13,6 +13,7 @@ import io.github.signalbot.persistence.ExecutionStore.SlippageRow;
 import io.github.signalbot.persistence.TradeQueryStore;
 import io.github.signalbot.telegram.SignalBotTelegramBot;
 import io.github.signalbot.telegram.TelegramSender;
+import io.github.signalbot.telegram.TelegramText;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -139,10 +140,15 @@ public class NightlyReviewJob {
             LOG.info("Nightly review (not pushed):\n{}", review);
             return;
         }
-        try {
-            sender.send(activeBot, telegram.chatId(), "Daily review\n" + review);
-        } catch (Exception e) {
-            LOG.warn("Failed to push nightly review: {}", e.getMessage());
+        List<String> parts = TelegramText.split("Daily review\n" + review);
+        for (int i = 0; i < parts.size(); i++) {
+            try {
+                sender.send(activeBot, telegram.chatId(), parts.get(i));
+            } catch (Exception e) {
+                LOG.warn("Failed to push nightly review part {}/{}: {}; the remaining parts are not sent",
+                        i + 1, parts.size(), e.getMessage());
+                return;
+            }
         }
     }
 }
