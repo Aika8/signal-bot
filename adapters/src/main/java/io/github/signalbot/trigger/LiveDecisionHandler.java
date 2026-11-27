@@ -55,9 +55,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The live path: decide -> (BUY: earnings blackout, D-006 -> ATR -> stop -> size, D-002/D-003) -> enforce risk limits -> submit a
- * confirmation-gated execution. A BUY without an ATR or whose size is below one share is REJECTED and notified,
- * never submitted with a guessed stop or size. A SELL keeps Claude's quantity (the paper wallet caps it at the
- * held quantity).
+ * confirmation-gated execution. A BUY without an ATR, without a usable stop (D-007) or whose size is below one
+ * share is REJECTED and notified, never submitted with a guessed stop or size. A SELL keeps Claude's quantity (the
+ * paper wallet caps it at the held quantity).
  */
 @Component
 public class LiveDecisionHandler {
@@ -210,7 +210,11 @@ public class LiveDecisionHandler {
         }
         Optional<StopDecision> stopDecision = StopPolicy.forBuy(entry, verdict.stop(), atr);
         if (stopDecision.isEmpty()) {
-            reject(verdict, "no ATR: not enough daily bars for ATR(" + ATR_PERIOD + ")");
+            if (atr.isPresent() && atr.get().signum() > 0) {
+                reject(verdict, "no usable stop: the stop would be at or below zero");
+            } else {
+                reject(verdict, "no ATR: not enough daily bars for ATR(" + ATR_PERIOD + ")");
+            }
             return;
         }
         StopDecision stop = stopDecision.get();
