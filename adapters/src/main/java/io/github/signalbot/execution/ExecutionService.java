@@ -2,6 +2,7 @@ package io.github.signalbot.execution;
 
 import io.github.signalbot.application.trigger.ExitGuard;
 import io.github.signalbot.application.trigger.TrailingLevels;
+import io.github.signalbot.application.trigger.TrailingPolicy;
 import io.github.signalbot.application.trigger.TriggerEvaluator;
 import io.github.signalbot.config.ExecutionProperties;
 import io.github.signalbot.domain.model.Action;
@@ -33,11 +34,6 @@ import java.util.Optional;
 public class ExecutionService {
 
     private static final Logger LOG = LoggerFactory.getLogger(ExecutionService.class);
-
-    /** D-004 starting values: activation = entry + 2R, offset = 1 × ATR(14), protective spread = 0.1 × ATR(14). */
-    private static final BigDecimal ACTIVATION_R = new BigDecimal("2");
-    private static final BigDecimal OFFSET_ATR = BigDecimal.ONE;
-    private static final BigDecimal SPREAD_ATR = new BigDecimal("0.1");
 
     private final ExecutionStore store;
     private final PaperWallet paperWallet;
@@ -198,25 +194,18 @@ public class ExecutionService {
     }
 
     /**
-     * The trailing take-profit of a BUY filled at {@code fillPrice} (D-004): R = fill − stop, activation = fill + 2R,
-     * offset = 1 × ATR, spread = 0.1 × ATR, with the ATR of the execution's sizing facts. {@code null} (stop only)
-     * when there is no ATR above zero, no stop, or the fill is not above the stop (no positive R).
+     * The trailing take-profit of a BUY filled at {@code fillPrice}: the D-004 rule of {@link TrailingPolicy}, with
+     * the ATR of the execution's sizing facts. {@code null} (stop only) when the policy gives none.
      */
     private static TrailingLevels trailingFor(ExecutionRow row, BigDecimal fillPrice) {
         BigDecimal atr = row.sizing() == null ? null : row.sizing().atr();
-        if (atr == null || atr.signum() <= 0 || row.stop() == null) {
-            LOG.info("BUY {} (execution {}) filled without an ATR or stop; arming the stop only", row.symbol(),
-                    row.id());
-            return null;
+        Optional<TrailingLevels> levels = TrailingPolicy.forFill(fillPrice, row.stop(), atr);
+        if (levels.isEmpty()) {
+            LOG.info("BUY {} (execution {}) filled at {} with stop {} and ATR {}: no trailing take-profit "
+                    + "(needs an ATR above zero and a fill above the stop); arming the stop only", row.symbol(),
+                    row.id(), fillPrice, row.stop(), atr);
         }
-        BigDecimal r = fillPrice.subtract(row.stop());
-        if (r.signum() <= 0) {
-            LOG.warn("BUY {} (execution {}) filled at {}, not above its stop {}; arming the stop only",
-                    row.symbol(), row.id(), fillPrice, row.stop());
-            return null;
-        }
-        return new TrailingLevels(fillPrice.add(ACTIVATION_R.multiply(r)), OFFSET_ATR.multiply(atr),
-                SPREAD_ATR.multiply(atr));
+        return levels.orElse(null);
     }
 
     private ExecutionResult failed(ExecutionRow row, RuntimeException e) {

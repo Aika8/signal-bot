@@ -520,3 +520,11 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   `…` (199 kept + `…`). Not taken: deleting line breaks outright (glues "line one" and "line two" into one word);
   200 code points plus the `…` (the bound would be 201). Unicode format characters (e.g. bidi overrides) are kept:
   removing them also breaks emoji joiners, and they cannot open or close a tag.
+- **SB-957** — Shape of the moved D-004 rule. Choices: (1) `TrailingPolicy.forFill(fill, stop, atr)` in
+  `application/trigger` returns `Optional<TrailingLevels>`, empty (stop only) for exactly the SB-013 cases — no ATR
+  above zero, no stop, fill not above the stop — with the factors 2R / 1 × ATR / 0.1 × ATR as package-private
+  constants, unrounded, values unchanged; (2) `ExecutionService.trailingFor` delegates and writes one info log line
+  with fill, stop and ATR when there is no trailing, instead of the former info/warn pair, so the arming conditions
+  live only in the policy. Not taken: returning `null` (callers in the backtest would need to know the convention);
+  re-checking the conditions in the adapter to keep two log levels (a second copy of the rule). Undo:
+  `ExecutionService.trailingFor`.
