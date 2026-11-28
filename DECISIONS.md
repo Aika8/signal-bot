@@ -508,6 +508,12 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   rejection reasons ("no ATR: …", "no usable stop") stay exactly as today. Not taken: trusting any non-null
   `ctx.atr()` (a non-positive one would be rejected with a misleading "not enough daily bars"; `ContextAssembler`
   never produces one anyway).
+- **SB-035** — Where does "Held without a stop" go, and what if the guards cannot be read? Choice: the line is
+  computed by code and, like "Trades in R", sent to Claude inside the summary and appended unchanged after Claude's
+  review; quantity is printed without trailing zeros; positions with quantity ≤ 0 are ignored. If
+  `findAllGuards` throws, the line reads `Held without a stop: not checked (guards unreadable)` (logged as a
+  warning) and the review is still stored and pushed. Not taken: letting the failure stop the whole nightly review
+  (a new line would then silence the old ones); printing `none` on failure (D-001: an error is not "nothing").
 - **SB-043** — What do "line breaks removed" and "at most 200 characters, `…` when cut" mean exactly in
   `UntrustedText.clean`? Choice: a line break (LF, CR, VT, FF, NEL, U+2028, U+2029) becomes a space so words do not
   run together; every other ISO control character is dropped; the ends are trimmed; the 200 code points include the
