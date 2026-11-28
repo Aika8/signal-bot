@@ -5,13 +5,16 @@ import io.github.signalbot.config.FinnhubProperties;
 import io.github.signalbot.domain.model.DailyBar;
 import io.github.signalbot.domain.model.EarningsEvent;
 import io.github.signalbot.market.AlpacaBarsMapper;
+import io.github.signalbot.market.AlpacaBarsQuery;
 import io.github.signalbot.market.AlpacaSnapshotMapper;
 import io.github.signalbot.news.FinnhubEarningsMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -22,6 +25,9 @@ import java.util.List;
 @Component
 public class ScreenRunner implements CommandLineRunner {
 
+    /** Completed daily bars per symbol: enough for ADV and Wilder's ATR(14). */
+    static final int BARS = 60;
+
     private record Row(String symbol, BigDecimal price, BigDecimal adv, BigDecimal atr, String earnings, boolean pass) {
     }
 
@@ -29,12 +35,20 @@ public class ScreenRunner implements CommandLineRunner {
     private final RestClient finnhub;
     private final FinnhubProperties finnhubProps;
     private final ScreenProperties screen;
+    private final Clock clock;
     private final AlpacaSnapshotMapper snapshotMapper = new AlpacaSnapshotMapper();
     private final AlpacaBarsMapper barsMapper = new AlpacaBarsMapper();
     private final FinnhubEarningsMapper earningsMapper = new FinnhubEarningsMapper();
 
+    @Autowired
     public ScreenRunner(RestClient alpacaDataRestClient, RestClient finnhubRestClient,
                         FinnhubProperties finnhubProps, ScreenProperties screen) {
+        this(alpacaDataRestClient, finnhubRestClient, finnhubProps, screen, Clock.systemUTC());
+    }
+
+    ScreenRunner(RestClient alpacaDataRestClient, RestClient finnhubRestClient,
+                 FinnhubProperties finnhubProps, ScreenProperties screen, Clock clock) {
+        this.clock = clock;
         this.alpaca = alpacaDataRestClient;
         this.finnhub = finnhubRestClient;
         this.finnhubProps = finnhubProps;
@@ -75,12 +89,14 @@ public class ScreenRunner implements CommandLineRunner {
         return snapshotMapper.toSnapshot(symbol, node).last();
     }
 
-    /** All daily bars Alpaca returns, oldest first; a missing or malformed field throws (D-001), never 0. */
-    private List<DailyBar> dailyBars(String symbol) {
-        JsonNode node = alpaca.get()
-                .uri(b -> b.path("/v2/stocks/{s}/bars").queryParam("timeframe", "1Day").queryParam("limit", 60).build(symbol))
-                .retrieve().body(JsonNode.class);
-        return barsMapper.toBars(symbol, node);
+    /**
+     * The last {@link #BARS} completed daily bars, oldest first, asked for as {@link AlpacaBarsQuery} builds it;
+     * today's (New York) unfinished bar is dropped. A missing or malformed field throws (D-001), never 0.
+     */
+    List<DailyBar> dailyBars(String symbol) {
+        AlpacaBarsQuery query = AlpacaBarsQuery.of(symbol, BARS, clock);
+        JsonNode node = alpaca.get().uri(query::uri).retrieve().body(JsonNode.class);
+        return barsMapper.completedBars(symbol, node, query.today(), BARS);
     }
 
     private static Bar toBar(DailyBar bar) {

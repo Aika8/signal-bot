@@ -13,8 +13,6 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.time.Clock;
-import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -22,14 +20,12 @@ import java.util.List;
  * when {@code signalbot.alpaca.enabled=true}. Parsing is delegated to
  * {@link AlpacaBarsMapper} (unit-tested); this class owns only the HTTP call.
  *
- * <p>Asks for the newest {@code count + 1} bars since a look-back start, then drops a
- * bar dated today (America/New_York): it may be the still-open session.
+ * <p>The request is {@link AlpacaBarsQuery}: the newest {@code count + 1} bars since a look-back start;
+ * a bar dated today (America/New_York) is then dropped: it may be the still-open session.
  */
 @Component
 @ConditionalOnProperty(prefix = "signalbot.alpaca", name = "enabled", havingValue = "true")
 public class AlpacaPriceHistory implements PriceHistory {
-
-    private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
 
     private final RestClient data;
     private final AlpacaBarsMapper mapper;
@@ -53,24 +49,17 @@ public class AlpacaPriceHistory implements PriceHistory {
         if (count < 1) {
             throw new IllegalArgumentException("count must be positive: " + count);
         }
-        LocalDate today = LocalDate.now(clock.withZone(NEW_YORK));
-        // Calendar days that surely hold count trading days (weekends, holidays).
-        LocalDate start = today.minusDays(2L * count + 10);
+        AlpacaBarsQuery query = AlpacaBarsQuery.of(symbol, count, clock);
         JsonNode body;
         try {
             body = data.get()
-                    .uri(b -> b.path("/v2/stocks/{s}/bars")
-                            .queryParam("timeframe", "1Day")
-                            .queryParam("start", start)
-                            .queryParam("limit", count + 1)
-                            .queryParam("sort", "desc")
-                            .build(symbol))
+                    .uri(query::uri)
                     .retrieve()
                     .body(JsonNode.class);
         } catch (RestClientException e) {
             throw new SourceFailureException(AlpacaBarsMapper.SOURCE,
                     symbol + ": daily bars request failed: " + e.getMessage(), e);
         }
-        return mapper.completedBars(symbol, body, today, count);
+        return mapper.completedBars(symbol, body, query.today(), count);
     }
 }
