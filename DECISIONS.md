@@ -520,3 +520,8 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   `…` (199 kept + `…`). Not taken: deleting line breaks outright (glues "line one" and "line two" into one word);
   200 code points plus the `…` (the bound would be 201). Unicode format characters (e.g. bidi overrides) are kept:
   removing them also breaks emoji joiners, and they cannot open or close a tag.
+- **SB-504 (lab sample statistics)** → no values: n 0, mean 0, std 0, empty t; one value: mean = that value, std 0,
+  empty t; zero spread is "all values equal" (not a computed std of 0, which rounding can miss) and then reports the
+  value as the mean and std 0. A null array throws `NullPointerException`. Not taken: NaN mean/std for n < 2 (would
+  contradict "NaN is refused"); throwing for an empty sample (callers would need a guard for every empty bucket).
+  Undo: `SampleStats.of`.
