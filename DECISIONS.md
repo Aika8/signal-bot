@@ -508,3 +508,11 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   rejection reasons ("no ATR: …", "no usable stop") stay exactly as today. Not taken: trusting any non-null
   `ctx.atr()` (a non-positive one would be rejected with a misleading "not enough daily bars"; `ContextAssembler`
   never produces one anyway).
+- **SB-042** — Where should the USD/KZT and EUR/KZT rates come from (today a hand-typed constant)? Choice: the
+  National Bank of Kazakhstan's official rates XML (no key, the issuer's own rate, both pairs in one file), read on
+  startup and daily after publication; a failed read throws, a rate older than 5 calendar days is stale, and with a
+  missing or stale rate no BUY is sized (fail closed, D-001) — see `docs/fx-source.md`; implementation queued as
+  tech debt SB-042-1. Facts about the outside services were written without network and are marked "not checked".
+  Not taken: KASE (no free API known), aggregators like open.er-api.com (changeable terms; kept as second choice,
+  never an automatic fallback), keyed vendors (no keys). Undo: delete `docs/fx-source.md` and the tech-debt file
+  before intake queues it, or pick another source there.
