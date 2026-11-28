@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 /** Pushes verdicts to the configured Telegram chat. Loaded only when the bot is enabled. */
 @Component
 @ConditionalOnProperty(prefix = "signalbot.telegram", name = "enabled", havingValue = "true")
@@ -31,10 +33,18 @@ public class TelegramNotifier implements Notifier {
             LOG.warn("No Telegram chat id configured; cannot push verdict for {}", verdict.symbol());
             return;
         }
-        try {
-            sender.send(bot, props.chatId(), format(verdict, contextSummary));
-        } catch (Exception e) {
-            LOG.warn("Failed to push verdict for {}: {}", verdict.symbol(), e.getMessage());
+        // Telegram refuses a message over its limit, so a long verdict goes out in parts, one call per part
+        // (AUTO-20261127-4). A failed part stops the push, as NightlyReviewJob does: later parts out of context help
+        // nobody, and the retry inside TelegramSender never resends parts already delivered.
+        List<String> parts = TelegramText.split(format(verdict, contextSummary));
+        for (int i = 0; i < parts.size(); i++) {
+            try {
+                sender.send(bot, props.chatId(), parts.get(i));
+            } catch (Exception e) {
+                LOG.warn("Failed to push verdict for {} (part {}/{}): {}; the remaining parts are not sent",
+                        verdict.symbol(), i + 1, parts.size(), e.getMessage());
+                return;
+            }
         }
     }
 
