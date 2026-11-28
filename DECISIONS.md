@@ -514,3 +514,11 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   `findAllGuards` throws, the line reads `Held without a stop: not checked (guards unreadable)` (logged as a
   warning) and the review is still stored and pushed. Not taken: letting the failure stop the whole nightly review
   (a new line would then silence the old ones); printing `none` on failure (D-001: an error is not "nothing").
+- **SB-957** — Shape of the moved D-004 rule. Choices: (1) `TrailingPolicy.forFill(fill, stop, atr)` in
+  `application/trigger` returns `Optional<TrailingLevels>`, empty (stop only) for exactly the SB-013 cases — no ATR
+  above zero, no stop, fill not above the stop — with the factors 2R / 1 × ATR / 0.1 × ATR as package-private
+  constants, unrounded, values unchanged; (2) `ExecutionService.trailingFor` delegates and writes one info log line
+  with fill, stop and ATR when there is no trailing, instead of the former info/warn pair, so the arming conditions
+  live only in the policy. Not taken: returning `null` (callers in the backtest would need to know the convention);
+  re-checking the conditions in the adapter to keep two log levels (a second copy of the rule). Undo:
+  `ExecutionService.trailingFor`.
