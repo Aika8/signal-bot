@@ -508,6 +508,19 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   rejection reasons ("no ATR: …", "no usable stop") stay exactly as today. Not taken: trusting any non-null
   `ctx.atr()` (a non-positive one would be rejected with a misleading "not enough daily bars"; `ContextAssembler`
   never produces one anyway).
+- **SB-042** — Where should the USD/KZT and EUR/KZT rates come from (today a hand-typed constant)? Choice: the
+  National Bank of Kazakhstan's official rates XML (no key, the issuer's own rate, both pairs in one file), read on
+  startup and daily after publication; a failed read throws, a rate older than 5 calendar days is stale, and with a
+  missing or stale rate no BUY is sized (fail closed, D-001), while bookings and exits keep converting at the last
+  good rate whatever its age, while with no rate ever read every trigger is refused as "context unavailable" (no
+  fallback); `FxProperties` and `new FxConverter(FxProperties)` stay unchanged (new settings in a new
+  `FxSourceProperties`), so existing tests compile untouched; the default source stays `fixed` (today's constants) until production sets
+  `FX_SOURCE=nbk` — see `docs/fx-source.md`; implementation queued as four size-S proposals in tech debt SB-042-1
+  (port with fixed source, NBK parser, BUY rejection, NBK source), each later one parking if an earlier one is
+  not on `main` yet. Facts about the outside services were written without network and are marked "not checked".
+  Not taken: KASE (no free API known), aggregators like open.er-api.com (changeable terms; kept as second choice,
+  never an automatic fallback), keyed vendors (no keys). Undo: delete `docs/fx-source.md`, and drop the
+  AUTO tasks intake made from the tech-debt file (or pick another source there).
 - **SB-035** — Where does "Held without a stop" go, and what if the guards cannot be read? Choice: the line is
   computed by code and, like "Trades in R", sent to Claude inside the summary and appended unchanged after Claude's
   review; quantity is printed without trailing zeros; positions with quantity ≤ 0 are ignored. If
