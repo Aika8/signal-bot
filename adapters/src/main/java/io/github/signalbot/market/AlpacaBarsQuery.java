@@ -9,7 +9,13 @@ import java.time.ZoneId;
 
 /**
  * The one place that builds an Alpaca daily-bars request: {@code /v2/stocks/{symbol}/bars?timeframe=1Day}
- * with a look-back {@code start}, {@code limit = count + 1} and {@code sort=desc}.
+ * with a look-back {@code start}, {@code limit = count + 1}, {@code sort=desc}, {@code adjustment=split} and
+ * {@code feed=sip}.
+ *
+ * <p>D-008: bars are split-adjusted (Alpaca's default is {@code raw}, which turns a split into a huge true range and
+ * inflates ATR(14), the stop and the size for weeks); {@code feed=sip} is Alpaca's default, sent explicitly so a plan
+ * change cannot silently switch to IEX. No {@code end} is sent: Alpaca's default end (15 minutes before now without
+ * real-time SIP access) keeps a free-plan SIP request valid.
  *
  * <p>Without {@code start} Alpaca returns only today's bar. {@code today} is the New York date: a bar dated
  * {@code today} may be the still-open session, so callers pass {@link #today()} to
@@ -22,6 +28,12 @@ import java.time.ZoneId;
 public record AlpacaBarsQuery(String symbol, int count, LocalDate today) {
 
     public static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
+
+    /** D-008: split-adjusted, not dividend-adjusted. */
+    public static final String ADJUSTMENT = "split";
+
+    /** D-008: Alpaca's default feed, named explicitly. */
+    public static final String FEED = "sip";
 
     public AlpacaBarsQuery {
         if (count < 1) {
@@ -46,6 +58,8 @@ public record AlpacaBarsQuery(String symbol, int count, LocalDate today) {
                 .queryParam("start", start())
                 .queryParam("limit", count + 1)
                 .queryParam("sort", "desc")
+                .queryParam("adjustment", ADJUSTMENT)
+                .queryParam("feed", FEED)
                 .build(symbol);
     }
 }
