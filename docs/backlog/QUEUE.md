@@ -2514,3 +2514,16 @@ Why: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java:5
 Make the stored row of a fired exit go away once the store is reachable again (for example: remember symbols whose
 delete failed and retry the delete on the next tick or before `GuardLoader` re-arms), without moving the disarm and
 delete after the portfolio read (SB-034). If this needs a migration or a new trading rule, park it.
+
+### AUTO-20261128-2 — Read the portfolio once per nightly review
+- status: todo
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/review/NightlyReviewJob.java`, `adapters/src/test/java/io/github/signalbot/review/NightlyReviewSinglePortfolioReadTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.review.*'`
+- expect: green; the new test verifies `PortfolioReader.read()` is called exactly once per `run()`; the existing review tests pass unchanged
+- source: issue#78#1
+- added: 2026-11-28
+
+Why: `adapters/src/main/java/io/github/signalbot/review/NightlyReviewJob.java:115,151` — after SB-035, `run()` reads the portfolio twice (total value in `buildSummary`, positions in `heldWithoutStop`). With a market-data feed, `PaperPortfolioReader` makes one snapshot call per position per read, so each night doubles the feed calls and the chance that a transient feed failure aborts the review, and the two lines can rest on different snapshots. Found by SB-035, reviewer, 2026-11-28
+
+In `run()`, read the portfolio once and pass that `Portfolio` to both `buildSummary` and `heldWithoutStop`. Keep every output line byte-for-byte the same.
