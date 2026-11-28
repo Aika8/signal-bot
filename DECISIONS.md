@@ -514,3 +514,8 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   `findAllGuards` throws, the line reads `Held without a stop: not checked (guards unreadable)` (logged as a
   warning) and the review is still stored and pushed. Not taken: letting the failure stop the whole nightly review
   (a new line would then silence the old ones); printing `none` on failure (D-001: an error is not "nothing").
+- **SB-504 (lab sample statistics)** → no values: n 0, mean 0, std 0, empty t; one value: mean = that value, std 0,
+  empty t; zero spread is "all values equal" (not a computed std of 0, which rounding can miss) and then reports the
+  value as the mean and std 0. A null array throws `NullPointerException`. Not taken: NaN mean/std for n < 2 (would
+  contradict "NaN is refused"); throwing for an empty sample (callers would need a guard for every empty bucket).
+  Undo: `SampleStats.of`.
