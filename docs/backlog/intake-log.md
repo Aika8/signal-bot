@@ -10,3 +10,6 @@ Written by `scripts/backlog/backlog.py intake` (GitHub Actions, daily): which pr
 - accepted: AUTO-20261127-4 ← issue#67#1 «Split long verdict messages in TelegramNotifier»
 - accepted: AUTO-20261127-5 ← issue#69#1 «Alert the operator when deleting the stored guard fails on a fired exit»
 - accepted: AUTO-20261127-6 ← issue#71#1 «Use the New York date for the screener's earnings window»
+
+## 2026-11-28
+- accepted: AUTO-20261128-1 ← issue#73#1 «Do not re-arm on restart a stored guard whose exit already fired»
