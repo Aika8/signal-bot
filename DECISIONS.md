@@ -512,7 +512,9 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   National Bank of Kazakhstan's official rates XML (no key, the issuer's own rate, both pairs in one file), read on
   startup and daily after publication; a failed read throws, a rate older than 5 calendar days is stale, and with a
   missing or stale rate no BUY is sized (fail closed, D-001), while bookings and exits keep converting at the last
-  good rate whatever its age; the default source stays `fixed` (today's constants) until production sets
+  good rate whatever its age, while with no rate ever read every trigger is refused as "context unavailable" (no
+  fallback); `FxProperties` and `new FxConverter(FxProperties)` stay unchanged (new settings in a new
+  `FxSourceProperties`), so existing tests compile untouched; the default source stays `fixed` (today's constants) until production sets
   `FX_SOURCE=nbk` — see `docs/fx-source.md`; implementation queued as four size-S proposals in tech debt SB-042-1
   (port with fixed source, NBK parser, BUY rejection, NBK source), each later one parking if an earlier one is
   not on `main` yet. Facts about the outside services were written without network and are marked "not checked".

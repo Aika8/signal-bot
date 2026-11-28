@@ -60,10 +60,17 @@ dependency on its forex coverage for KZT is unverified and widens what one key f
   weekend plus the longest usual Kazakh holiday bridge (e.g. Nauryz) — **not checked** against the holiday
   calendar. The number is a property (`signalbot.fx.max-age-days`), not a trading parameter: it decides only whether
   a rate exists at all.
-- **What a missing or stale rate blocks: only sizing a new BUY.** `LiveDecisionHandler` rejects the BUY with
+- **What a stale rate blocks: only sizing a new BUY.** `LiveDecisionHandler` rejects the BUY with
   "FX rate unavailable (<reason>)", the same way it rejects "no ATR" and "earnings calendar unavailable" (SB-020),
-  and the operator gets the usual Telegram rejection. HOLD and SELL verdicts and exits still flow: closing a
-  position must never depend on how fresh a tenge rate is.
+  and the operator gets the usual Telegram rejection. With a **stale** (but once read) rate, HOLD and SELL verdicts
+  and exits still flow: closing a position must never depend on how fresh a tenge rate is.
+- **A missing rate (none ever read) blocks every verdict, on purpose.** `LiveDecisionHandler.handle` assembles the
+  context first (`ContextAssembler.assemble` → `portfolioReader.read`), and `PaperPortfolioReader` converts through
+  `FxConverter`, which throws `SourceFailureException("no FX rate read yet")`. So every trigger stops before Claude
+  runs, with `NO VERDICT: context unavailable (no FX rate read yet)` logged at ERROR and sent as a Telegram alert
+  (`LiveDecisionHandler.java:159`, `fail`): no BUY, HOLD or SELL verdict comes out until the first good read. This
+  is the intended fail-closed behaviour (D-001). No fallback rate, constant or default is ever used to let verdicts
+  "flow" in this window; exits in it take the "(position not checked)" path below.
 - **Bookings use the last good rate, whatever its age.** Every paper booking (a BUY fill the operator already
   confirmed, a SELL, an exit) converts through `FxConverter` (`PaperWalletImpl.java:90,111,113`, the fees through
   `FeeModel`). Staleness is therefore **not** checked inside `FxConverter.toKzt`/`rateOf`: those keep converting at
@@ -71,8 +78,8 @@ dependency on its forex coverage for KZT is unverified and widens what one key f
   by the BUY sizing path. The rate and its NBK date are logged with each booking (INFO); storing the date with the
   booking would need a migration and is left out.
 - **No rate ever read** (only possible with `signalbot.fx.source=nbk`: startup before the first good read, or NBK
-  down since boot): the application still starts (exits must stay armed), BUY sizing stays closed and an alert says
-  so. If an exit fires in that window, `ExitGuardHandler` reads the portfolio first, and `PaperPortfolioReader`
+  down since boot): the application still starts (exits must stay armed), and every trigger is refused with the
+  "context unavailable (no FX rate read yet)" alert above. If an exit fires in that window, `ExitGuardHandler` reads the portfolio first, and `PaperPortfolioReader`
   converts through `FxConverter` (`PaperPortfolioReader.java:61,78`), which throws
   `SourceFailureException("no FX rate read yet")`. The handler already treats a failed portfolio read as
   AUTO-20261127-2 made it (`ExitGuardHandler.java:62-70`, `ExitHandlerFailureTest`): it logs at ERROR, sends the
@@ -85,7 +92,14 @@ dependency on its forex coverage for KZT is unverified and widens what one key f
 
 ## Where it goes in the code
 
-`FxConverter` stays the one FX rule; only where its numbers come from changes. The implementation is queued as
+`FxConverter` stays the one FX rule; only where its numbers come from changes. Existing callers keep compiling:
+`FxProperties(BigDecimal usdKzt, BigDecimal eurKzt)` is **not** changed (the new `source` and `max-age-days`
+settings live in a new record, `FxSourceProperties`), and `new FxConverter(FxProperties)` keeps working (it wraps
+the fixed source), next to a new Spring constructor marked `@Autowired`. Five existing tests build these classes
+directly and must compile untouched: `FeeModelTest`, `LiveDecisionEarningsBlackoutTest`,
+`LiveDecisionNonPositiveStopTest`, `LiveDecisionHandlerAtrTest`, `LiveDecisionContextAtrTest`. The staleness
+question is a method on `FxConverter` that only the BUY sizing path calls, so `LiveDecisionHandler`'s constructors
+(used by six existing tests) do not change either. The implementation is queued as
 four size-S proposals in `docs/backlog/tech-debt/2026-11-28-SB-042-1.md`, in this order:
 
 1. an `FxRateSource` port behind `FxConverter` with a fixed source (today's constants), no change in behaviour;
