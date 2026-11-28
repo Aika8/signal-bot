@@ -16,7 +16,6 @@ import org.springframework.web.client.RestClient;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -103,8 +102,12 @@ public class ScreenRunner implements CommandLineRunner {
         return new Bar(bar.high(), bar.low(), bar.close(), bar.volume());
     }
 
-    private String nextEarnings(String symbol) {
-        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+    /**
+     * The next earnings date within 30 days, or {@code "-"}. The window starts at today's New York date, the same
+     * date {@link AlpacaBarsQuery} uses, so an event dated today (New York) is not missed after UTC midnight.
+     */
+    String nextEarnings(String symbol) {
+        LocalDate today = LocalDate.now(clock.withZone(AlpacaBarsQuery.NEW_YORK));
         LocalDate to = today.plusDays(30);
         JsonNode node = finnhub.get()
                 .uri(b -> b.path("/calendar/earnings").queryParam("symbol", symbol)
