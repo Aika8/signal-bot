@@ -13,3 +13,4 @@ Written by `scripts/backlog/backlog.py intake` (GitHub Actions, daily): which pr
 
 ## 2026-11-28
 - accepted: AUTO-20261128-1 ← issue#73#1 «Do not re-arm on restart a stored guard whose exit already fired»
+- accepted: AUTO-20261128-2 ← issue#78#1 «Read the portfolio once per nightly review»
