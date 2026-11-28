@@ -519,3 +519,9 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   Not taken: KASE (no free API known), aggregators like open.er-api.com (changeable terms; kept as second choice,
   never an automatic fallback), keyed vendors (no keys). Undo: delete `docs/fx-source.md`, and drop the
   AUTO tasks intake made from the tech-debt file (or pick another source there).
+- **SB-035** — Where does "Held without a stop" go, and what if the guards cannot be read? Choice: the line is
+  computed by code and, like "Trades in R", sent to Claude inside the summary and appended unchanged after Claude's
+  review; quantity is printed without trailing zeros; positions with quantity ≤ 0 are ignored. If
+  `findAllGuards` throws, the line reads `Held without a stop: not checked (guards unreadable)` (logged as a
+  warning) and the review is still stored and pushed. Not taken: letting the failure stop the whole nightly review
+  (a new line would then silence the old ones); printing `none` on failure (D-001: an error is not "nothing").
