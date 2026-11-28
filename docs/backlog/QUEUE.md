@@ -2499,3 +2499,18 @@ still send the alert and submit the SELL, as on the normal path, so a store outa
 Why: `adapters/src/main/java/io/github/signalbot/screen/ScreenRunner.java:107` — `nextEarnings` computes `today` with `LocalDate.now(ZoneOffset.UTC)` and ignores the injected `Clock`. After 19:00/20:00 New York time the Finnhub window starts one day late, so an earnings event dated today (NY) is missed. The bars request uses the NY date (`AlpacaBarsQuery.NEW_YORK`). Found by SB-040, reviewer, 2026-11-27.
 
 In `ScreenRunner.nextEarnings`, take today as `LocalDate.now(clock.withZone(AlpacaBarsQuery.NEW_YORK))`, using the `clock` field SB-040 added, instead of the UTC date. Add a new test file. Do not edit existing tests.
+
+### AUTO-20261128-1 — Do not re-arm on restart a stored guard whose exit already fired
+- status: todo
+- size: S
+- paths: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java`, `adapters/src/main/java/io/github/signalbot/trigger/GuardLoader.java`, `adapters/src/test/java/io/github/signalbot/trigger/FiredGuardRestartTest.java`
+- verify: `./gradlew :adapters:test --tests 'io.github.signalbot.trigger.*'`
+- expect: green; the new test (delete throws on a fired exit, then the store recovers, then `GuardLoader.run`) fails before the fix: the fired symbol is armed again
+- source: issue#73#1
+- added: 2026-11-28
+
+Why: `adapters/src/main/java/io/github/signalbot/trigger/ExitGuardHandler.java:52-59` — since AUTO-20261127-5 a failed `guardStore.delete` is logged and the exit goes on, but the stored row survives, so `GuardLoader.run` re-arms that guard after a restart and the same level can fire a second "SELL <symbol> now" alert and SELL; found by AUTO-20261127-5, reviewer, 2026-11-28
+
+Make the stored row of a fired exit go away once the store is reachable again (for example: remember symbols whose
+delete failed and retry the delete on the next tick or before `GuardLoader` re-arms), without moving the disarm and
+delete after the portfolio read (SB-034). If this needs a migration or a new trading rule, park it.
