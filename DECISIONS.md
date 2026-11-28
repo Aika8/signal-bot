@@ -508,3 +508,9 @@ Decisions the cloud agents took without Aika, one bullet each (task id, question
   rejection reasons ("no ATR: …", "no usable stop") stay exactly as today. Not taken: trusting any non-null
   `ctx.atr()` (a non-positive one would be rejected with a misleading "not enough daily bars"; `ContextAssembler`
   never produces one anyway).
+- **SB-043** — What do "line breaks removed" and "at most 200 characters, `…` when cut" mean exactly in
+  `UntrustedText.clean`? Choice: a line break (LF, CR, VT, FF, NEL, U+2028, U+2029) becomes a space so words do not
+  run together; every other ISO control character is dropped; the ends are trimmed; the 200 code points include the
+  `…` (199 kept + `…`). Not taken: deleting line breaks outright (glues "line one" and "line two" into one word);
+  200 code points plus the `…` (the bound would be 201). Unicode format characters (e.g. bidi overrides) are kept:
+  removing them also breaks emoji joiners, and they cannot open or close a tag.
