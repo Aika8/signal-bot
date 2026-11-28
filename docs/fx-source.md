@@ -60,21 +60,40 @@ dependency on its forex coverage for KZT is unverified and widens what one key f
   weekend plus the longest usual Kazakh holiday bridge (e.g. Nauryz) — **not checked** against the holiday
   calendar. The number is a property (`signalbot.fx.max-age-days`), not a trading parameter: it decides only whether
   a rate exists at all.
-- With a missing or stale rate: **no BUY is sized.** `LiveDecisionHandler` rejects the BUY with
+- **What a missing or stale rate blocks: only sizing a new BUY.** `LiveDecisionHandler` rejects the BUY with
   "FX rate unavailable (<reason>)", the same way it rejects "no ATR" and "earnings calendar unavailable" (SB-020),
   and the operator gets the usual Telegram rejection. HOLD and SELL verdicts and exits still flow: closing a
-  position must never depend on a tenge rate.
-- Paper fills already confirmed by the operator are booked at the last good rate and the booking says which rate
-  date it used, so nothing confirmed is lost; a fill with no rate at all at hand fails loudly (alert), not silently.
-- At startup with no rate at all: the application starts (exits must stay armed), BUY sizing stays closed until the
-  first good read, and an alert says so.
-- The environment constants `FX_USD_KZT` / `FX_EUR_KZT` stay only for tests (`@SpringBootTest(properties =
-  "signalbot.fx.usd-kzt=500")` already does this) and behind an explicit `signalbot.fx.source=fixed` switch; the
-  default becomes `nbk`. A fixed rate is never a silent fallback for a failed NBK read.
+  position must never depend on how fresh a tenge rate is.
+- **Bookings use the last good rate, whatever its age.** Every paper booking (a BUY fill the operator already
+  confirmed, a SELL, an exit) converts through `FxConverter` (`PaperWalletImpl.java:90,111,113`, the fees through
+  `FeeModel`). Staleness is therefore **not** checked inside `FxConverter.toKzt`/`rateOf`: those keep converting at
+  the last good rate, so a stale rate never blocks an exit. The staleness check is a separate question asked only
+  by the BUY sizing path. The rate and its NBK date are logged with each booking (INFO); storing the date with the
+  booking would need a migration and is left out.
+- **No rate ever read** (only possible with `signalbot.fx.source=nbk`: startup before the first good read, or NBK
+  down since boot): the application still starts (exits must stay armed), BUY sizing stays closed and an alert says
+  so. If an exit fires in that window, `ExitGuardHandler` reads the portfolio first, and `PaperPortfolioReader`
+  converts through `FxConverter` (`PaperPortfolioReader.java:61,78`), which throws
+  `SourceFailureException("no FX rate read yet")`. The handler already treats a failed portfolio read as
+  AUTO-20261127-2 made it (`ExitGuardHandler.java:62-70`, `ExitHandlerFailureTest`): it logs at ERROR, sends the
+  exit alert marked "(position not checked)" and submits no SELL. The operator closes the position by hand after
+  the first good read. Nothing is booked at an invented rate, and the alert is never lost.
+- **Default source stays `fixed`.** `signalbot.fx.source` defaults to `fixed` (the current `FX_USD_KZT` /
+  `FX_EUR_KZT` constants), so every existing `@SpringBootTest` keeps working without a network read and without
+  editing any test. Production switches to NBK by setting `FX_SOURCE=nbk` in its environment once the NBK source is
+  merged and its format checked by hand. With `nbk`, a failed NBK read never falls back to the constants.
 
 ## Where it goes in the code
 
-`FxConverter` stays the one FX rule; only where its numbers come from changes (an `FxRateSource` behind it, NBK in
-`adapters`, a fixed source for tests). The implementation is proposed as its own task:
-`docs/backlog/tech-debt/2026-11-28-SB-042-1.md`. The choice is recorded in `DECISIONS.md` under
+`FxConverter` stays the one FX rule; only where its numbers come from changes. The implementation is queued as
+four size-S proposals in `docs/backlog/tech-debt/2026-11-28-SB-042-1.md`, in this order:
+
+1. an `FxRateSource` port behind `FxConverter` with a fixed source (today's constants), no change in behaviour;
+2. an NBK XML parser with fixture tests (no network, no wiring);
+3. the BUY rejection on a missing or stale rate, in `LiveDecisionHandler`;
+4. the NBK source itself (startup + daily read, last good rate kept), selected only by `signalbot.fx.source=nbk`,
+   with the "no rate ever read" exit behaviour above.
+
+Each later piece checks first that the earlier ones are on `main` and parks with "missing: …" if not (intake cannot
+yet express `depends` on tasks it has not created). The choice is recorded in `DECISIONS.md` under
 "Backlog run (December 2026)".
